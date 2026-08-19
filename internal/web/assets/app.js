@@ -773,6 +773,7 @@ Object.assign(viewLoaders, {
 document.addEventListener('DOMContentLoaded', () => {
   // Artwork first, so the first table drawn already uses it if present.
   loadCustomIcons().finally(() => show(state.view));
+  startPing();
   loadFilters().catch(() => {});
   show('overview');
   refreshCounts().catch(() => {});

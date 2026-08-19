@@ -119,6 +119,7 @@ func (s *Server) Listen(ctx context.Context, addr string) error {
 	api.HandleFunc("GET /api/search", s.json(s.globalSearch))
 	api.HandleFunc("GET /api/spending", s.json(s.spending))
 	api.HandleFunc("GET /api/schedule", s.json(s.scheduleStatus))
+	api.HandleFunc("GET /api/ping", s.ping)
 	api.HandleFunc("GET /api/invoices/{id}/file", s.invoiceFile)
 	api.HandleFunc("GET /api/job", s.json(s.jobStatus))
 	api.HandleFunc("POST /api/job/cancel", s.json(s.jobCancel))
@@ -358,6 +359,16 @@ func (s *Server) invoiceFile(w http.ResponseWriter, r *http.Request) {
 	// inline, so a PDF opens in the browser's viewer rather than downloading.
 	w.Header().Set("Content-Disposition", "inline; filename="+strconv.Quote(filepath.Base(path)))
 	http.ServeFile(w, r, path)
+}
+
+// ping answers as cheaply as possible: no database, no work, just enough to
+// prove the round trip. Anything it did would be measured as latency and
+// misreported as network time.
+func (s *Server) ping(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	// Must never be cached, or the reading is of the cache rather than the link.
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+	w.Write([]byte(`{"ok":true}`))
 }
 
 // scheduleStatus reports the daily timer so the dashboard can show when the

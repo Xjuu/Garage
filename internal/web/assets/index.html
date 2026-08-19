@@ -14,6 +14,9 @@
   <div class="topbar-inner">
     <div class="brand"><span class="brand-mark">G</span> Goldstar</div>
     <span class="credit">Made by Filip Klonowski</span>
+    <span class="ping" id="ping" title="Round trip from this browser to the server">
+      <span class="ping-dot" id="ping-dot"></span><span id="ping-ms">—</span>
+    </span>
     <div class="spacer"></div>
     <button class="btn solid" id="btn-sync">
       <span id="sync-label">Sync mailbox</span>
@@ -572,6 +575,7 @@
 
 <div class="toasts" id="toasts"></div>
 
+<script src="/static/ping.js"></script>
 <script src="/static/caricon.js"></script>
 <script src="/static/chart.js"></script>
 <script src="/static/app.js"></script>
