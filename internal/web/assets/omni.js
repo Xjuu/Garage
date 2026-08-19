@@ -25,6 +25,17 @@ function closeOmni() {
   omniResults.innerHTML = '';
 }
 
+/** Called once a result has actually been picked — by click or by Enter on
+    the top hit. The search bar goes back to its resting state: empty, the
+    clear button gone, focus released — rather than sitting there holding the
+    query that has already done its job. */
+function resetOmni() {
+  omni.value = '';
+  $('omni-clear').hidden = true;
+  closeOmni();
+  omni.blur();
+}
+
 /** A hit row. Amount means gross for invoices/vehicles/suppliers and net for
     parts, so each row is labelled rather than leaving the reader to guess. */
 function hitRow(h) {
@@ -61,7 +72,7 @@ function renderOmni(res) {
   omniResults.querySelectorAll('.omni-hit').forEach((b) =>
     b.addEventListener('click', () => {
       openHit(b.dataset.kind, b.dataset.ref);
-      closeOmni();
+      resetOmni();
     }));
 
   // The first hit rendered is what Enter opens, so it is marked to show that
@@ -122,10 +133,17 @@ omni.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeOmni(); omni.blur(); return; }
   if (e.key !== 'Enter') return;
 
+  // resetOmni() below calls omni.blur(), which changes document.activeElement
+  // synchronously — before this same keydown event finishes bubbling. Without
+  // stopping it here, the document-level "Return focuses search" handler
+  // added further down would see the input no longer focused and immediately
+  // refocus it, undoing the reset in the same keystroke.
+  e.stopPropagation();
+
   const topHit = !omniResults.hidden && omniResults.querySelector('.omni-hit.top');
   if (topHit) {
     openHit(topHit.dataset.kind, topHit.dataset.ref);
-    closeOmni();
+    resetOmni();
     return;
   }
 
@@ -159,11 +177,25 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.searchbar')) closeOmni();
 });
 
-// "/" focuses search from anywhere, unless something else already has focus.
+// "/" or Return focuses the search bar from anywhere, unless something else
+// already has a stronger claim on the keystroke.
 document.addEventListener('keydown', (e) => {
-  if (e.key !== '/' || e.metaKey || e.ctrlKey) return;
-  const tag = document.activeElement?.tagName;
+  if (e.metaKey || e.ctrlKey) return;
+  if (e.key !== '/' && e.key !== 'Enter') return;
+
+  const active = document.activeElement;
+  const tag = active?.tagName;
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+
+  // Return carries native behaviour "/" does not: it activates a focused
+  // button or link, and a modal dialog may want it for its own primary
+  // action. Stealing it there would hijack the button, or send the cursor
+  // to a search bar sitting invisibly behind an open dialog.
+  if (e.key === 'Enter') {
+    if (tag === 'BUTTON' || tag === 'A' || active?.isContentEditable) return;
+    if (!$('gen-modal').hidden || !$('files-modal').hidden) return;
+  }
+
   e.preventDefault();
   omni.focus();
 });
