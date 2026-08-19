@@ -97,7 +97,9 @@ ssh "$TARGET" "
     sed -i 's|^\[Install\]|User=$SERVICE_USER\nGroup=$SERVICE_USER\n\n[Install]|' /etc/systemd/system/goldstar.service
   rm -f /tmp/goldstar.service.tmpl
 
-  if [ ! -f .env ]; then
+  # -s not -f: an empty .env is not a configured one, and treating it as such
+  # leaves a server with no settings at all.
+  if [ ! -s .env ]; then
     cat > .env <<'ENVEOF'
 WEB_ADDR=127.0.0.1:8787
 GOLDSTAR_COOKIE_SECURE=true
