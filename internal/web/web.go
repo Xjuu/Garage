@@ -97,7 +97,7 @@ func (s *Server) Listen(ctx context.Context, addr string) error {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", staticHandler(sub)))
 	// "/{$}" matches only the exact root; a bare "GET /" would conflict with
 	// the "/api/" subtree registration below.
 	mux.HandleFunc("GET /{$}", s.handleRoot)

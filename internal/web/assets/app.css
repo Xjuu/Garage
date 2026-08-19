@@ -834,12 +834,12 @@ td.strong { font-weight: 700; }
    with no second asset and no JavaScript watching the colour scheme. */
 
 .car {
-  width: 44px; height: 19px;
+  width: 88px; height: 38px;
   flex-shrink: 0;
   color: inherit;
   overflow: visible;
 }
-.car.lg { width: 78px; height: 33px; }
+.car.lg { width: 156px; height: 66px; }
 
 .car-body, .car-tyre, .car-sign { fill: currentColor; }
 
@@ -891,7 +891,11 @@ tr:hover .veh .car, .veh:hover .car { opacity: 1; }
    icon is in use. Sized in CSS with width and height also set on the element,
    so the row never reflows as images arrive. */
 .car.art {
-  width: 120px; height: 120px;
+  /* Sized in one place: every table, the overview and the registry all read
+     from here, so "everywhere" stays one number rather than several that
+     drift apart. */
+  width: var(--car-size, 240px);
+  height: var(--car-size, 240px);
   object-fit: contain;
   /* No tile behind them any more: the artwork carries its own transparency,
      so it sits directly on whatever the row's background happens to be. */
@@ -899,7 +903,7 @@ tr:hover .veh .car, .veh:hover .car { opacity: 1; }
   border-radius: 0;
   opacity: 1;
 }
-.car.art.lg { width: 256px; height: 256px; border-radius: 0; }
+.car.art.lg { --car-size: 512px; border-radius: 0; }
 .veh .car.art { opacity: 1; }
 
 /* The tile carries its own breathing room rather than the row being widened
