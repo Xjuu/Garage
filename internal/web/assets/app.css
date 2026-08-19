@@ -588,17 +588,26 @@ td.strong { font-weight: 700; }
 
 /* Always visible, not tucked behind a hover or a focus state — the point is
    that someone who has never used the shortcut sees it without having to go
-   looking for it first. */
+   looking for it first. Built as a bordered, filled chip rather than plain
+   grey caption text: next to the search input and the date fields, a quiet
+   label reads as one more piece of fine print and gets lost. */
 .omni-hint {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--g4); font-weight: 600;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  border-radius: 100px;
+  border: 1px solid var(--g3);
+  background: var(--g05);
+  font-size: 13px; color: var(--ink); font-weight: 600;
   white-space: nowrap; flex-shrink: 0; cursor: default;
 }
+/* A solid keycap — ink on paper — is the one place this quiet page borrows
+   full contrast, because a shortcut hint only works if the key itself is
+   unmistakable. */
 .omni-hint kbd {
-  display: inline-block; padding: 1px 7px; border-radius: 5px;
-  background: var(--g1); color: var(--g5);
-  font-family: var(--mono); font-size: 11px; font-weight: 700;
-  line-height: 16px; border: 1px solid var(--g2);
+  display: inline-block; padding: 2px 9px; border-radius: 5px;
+  background: var(--ink); color: var(--paper);
+  font-family: var(--mono); font-size: 13px; font-weight: 800;
+  line-height: 19px;
 }
 
 @media (max-width: 720px) {
