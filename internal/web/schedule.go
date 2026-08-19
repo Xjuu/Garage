@@ -22,11 +22,12 @@ import (
 // laptop that slept through the moment picks the next one up correctly rather
 // than firing a burst of missed runs.
 type scheduler struct {
-	cfg  *config.Config
-	srv  *Server
-	loc  *time.Location
-	hour int
-	min  int
+	cfg   *config.Config
+	srv   *Server
+	loc   *time.Location
+	every time.Duration // interval mode; zero means daily-at-a-time mode
+	hour  int
+	min   int
 
 	mu                  sync.Mutex
 	next                time.Time
@@ -35,20 +36,42 @@ type scheduler struct {
 	lastOK              bool
 	lastError           string
 	lastSuccess         time.Time
+	lastBackup          time.Time
 	consecutiveFailures int
 }
 
 func newScheduler(cfg *config.Config, srv *Server) (*scheduler, error) {
+	loc, err := time.LoadLocation(cfg.SyncTZ)
+	if err != nil {
+		return nil, fmt.Errorf("unknown timezone %q: %w", cfg.SyncTZ, err)
+	}
+
+	// An interval wins over a fixed time. Both being set is a contradiction,
+	// and silently picking one without saying so is how people end up
+	// convinced the timer is broken.
+	if every := strings.TrimSpace(cfg.SyncEvery); every != "" {
+		d, err := time.ParseDuration(every)
+		if err != nil {
+			return nil, fmt.Errorf("sync interval %q must look like 1h or 30m: %w", every, err)
+		}
+		// A very short interval hammers the mailbox for no benefit: invoices
+		// arrive minutes apart at best, and every run opens an IMAP session.
+		if d < time.Minute {
+			return nil, fmt.Errorf("sync interval %s is too short; use 1m or more", d)
+		}
+		if strings.TrimSpace(cfg.SyncAt) != "" {
+			log.Printf("both GOLDSTAR_SYNC_EVERY and GOLDSTAR_SYNC_AT are set; "+
+				"syncing every %s and ignoring the daily time %s", d, cfg.SyncAt)
+		}
+		return &scheduler{cfg: cfg, srv: srv, loc: loc, every: d}, nil
+	}
+
 	if strings.TrimSpace(cfg.SyncAt) == "" {
 		return nil, nil // scheduling switched off
 	}
 	hour, min, err := parseClock(cfg.SyncAt)
 	if err != nil {
 		return nil, err
-	}
-	loc, err := time.LoadLocation(cfg.SyncTZ)
-	if err != nil {
-		return nil, fmt.Errorf("unknown timezone %q: %w", cfg.SyncTZ, err)
 	}
 	return &scheduler{cfg: cfg, srv: srv, loc: loc, hour: hour, min: min}, nil
 }
@@ -73,6 +96,9 @@ func parseClock(s string) (hour, min int, err error) {
 // `from`. Constructing the time in the target zone is what makes DST correct:
 // the zone decides what offset 18:30 has on that particular date.
 func (s *scheduler) nextRun(from time.Time) time.Time {
+	if s.every > 0 {
+		return from.Add(s.every)
+	}
 	local := from.In(s.loc)
 	next := time.Date(local.Year(), local.Month(), local.Day(), s.hour, s.min, 0, 0, s.loc)
 	if !next.After(local) {
@@ -94,10 +120,15 @@ func (s *scheduler) Status() map[string]any {
 	defer s.mu.Unlock()
 	out := map[string]any{
 		"enabled":    true,
-		"at":         fmt.Sprintf("%02d:%02d", s.hour, s.min),
 		"timezone":   s.loc.String(),
 		"next":       s.next.Format(time.RFC3339),
 		"next_local": s.next.In(s.loc).Format("Mon 2 Jan 15:04 MST"),
+	}
+	if s.every > 0 {
+		out["every"] = s.every.String()
+		out["at"] = "every " + s.every.String()
+	} else {
+		out["at"] = fmt.Sprintf("%02d:%02d", s.hour, s.min)
 	}
 	if !s.last.IsZero() {
 		out["last"] = s.last.In(s.loc).Format("Mon 2 Jan 15:04 MST")
@@ -120,7 +151,11 @@ func (s *scheduler) Status() map[string]any {
 
 // run blocks until ctx is cancelled, syncing once per day at the set time.
 func (s *scheduler) run(ctx context.Context) {
-	log.Printf("mailbox sync scheduled for %02d:%02d %s daily", s.hour, s.min, s.loc)
+	if s.every > 0 {
+		log.Printf("mailbox sync scheduled every %s", s.every)
+	} else {
+		log.Printf("mailbox sync scheduled for %02d:%02d %s daily", s.hour, s.min, s.loc)
+	}
 
 	for {
 		next := s.nextRun(time.Now())
@@ -162,11 +197,19 @@ func (s *scheduler) fire() {
 
 		// Snapshot before ingesting, not after: if a bad run corrupts or
 		// pollutes the data, the backup you want is the one taken beforehand.
-		if path, bErr := pipeline.RunBackup(s.cfg, s.srv.db); bErr != nil {
-			logLine("backup failed: " + bErr.Error())
-			s.recordFailure("backup failed: " + bErr.Error())
-		} else if path != "" {
-			logLine("backed up to " + filepath.Base(path))
+		//
+		// Throttled to once a day. With an hourly sync an unthrottled backup
+		// would take 24 snapshots a day and the retention limit would evict
+		// everything older than about half a day — leaving a "backup" that
+		// only ever covers this morning.
+		if s.dueForBackup() {
+			if path, bErr := pipeline.RunBackup(s.cfg, s.srv.db); bErr != nil {
+				logLine("backup failed: " + bErr.Error())
+				s.recordFailure("backup failed: " + bErr.Error())
+			} else if path != "" {
+				s.markBackedUp()
+				logLine("backed up to " + filepath.Base(path))
+			}
 		}
 
 		st, err := pipeline.Fetch(ctx, s.cfg, s.srv.db, logf)
@@ -192,6 +235,22 @@ func (s *scheduler) fire() {
 		return
 	}
 	log.Print("scheduled mailbox sync started")
+}
+
+// backupInterval is how often a snapshot is taken, independent of how often
+// the mailbox is checked.
+const backupInterval = 20 * time.Hour
+
+func (s *scheduler) dueForBackup() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Since(s.lastBackup) >= backupInterval
+}
+
+func (s *scheduler) markBackedUp() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastBackup = time.Now()
 }
 
 func (s *scheduler) recordSuccess(result string) {

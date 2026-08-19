@@ -32,8 +32,13 @@ type Config struct {
 	User  string
 	Email string
 
-	// SyncAt is a local clock time ("18:30") in SyncTZ at which the mailbox is
-	// pulled automatically while the dashboard is running.
+	// SyncEvery is a repeat interval ("1h", "30m"). When set it wins over
+	// SyncAt, because "check often" and "check at a fixed time" are different
+	// intentions and one of them has to take precedence predictably.
+	SyncEvery string
+
+	// SyncAt is a local clock time ("18:30") in SyncTZ for once-a-day syncing,
+	// used only when SyncEvery is empty.
 	SyncAt string
 	SyncTZ string
 
@@ -77,7 +82,8 @@ func Load() (*Config, error) {
 		GeminiModel:     envStr("GEMINI_MODEL", "gemini-3.1-flash-lite"),
 		User:            envStr("GOLDSTAR_USER", ""),
 		Email:           envStr("GOLDSTAR_EMAIL", ""),
-		SyncAt:          envStr("GOLDSTAR_SYNC_AT", "18:30"),
+		SyncEvery:       envStr("GOLDSTAR_SYNC_EVERY", "1h"),
+		SyncAt:          envStr("GOLDSTAR_SYNC_AT", ""),
 		SyncTZ:          envStr("GOLDSTAR_SYNC_TZ", "Europe/London"),
 		BackupKeep:      envInt("GOLDSTAR_BACKUP_KEEP", 14),
 		DataDir:         envStr("DATA_DIR", defaultDataDir(home)),

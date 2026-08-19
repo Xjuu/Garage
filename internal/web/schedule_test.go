@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"goldstar/internal/config"
 )
 
 // The point of naming a zone rather than fixing an offset is that 18:30 stays
@@ -96,5 +98,70 @@ func TestSchedulerFailureTracking(t *testing.T) {
 	}
 	if s.lastSuccess.IsZero() {
 		t.Error("lastSuccess was not recorded")
+	}
+}
+
+// Interval mode is what "check every hour" means. It must not consult the
+// timezone-and-wall-clock path at all.
+func TestIntervalScheduling(t *testing.T) {
+	loc, _ := time.LoadLocation("Europe/London")
+	s := &scheduler{loc: loc, every: time.Hour}
+
+	from, _ := time.Parse(time.RFC3339, "2026-08-19T14:20:00Z")
+	got := s.nextRun(from)
+	want := from.Add(time.Hour)
+	if !got.Equal(want) {
+		t.Errorf("nextRun = %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+
+	// Repeated calls must keep stepping forward, not stick on one instant.
+	second := s.nextRun(got)
+	if !second.Equal(got.Add(time.Hour)) {
+		t.Errorf("second run = %s, want %s", second, got.Add(time.Hour))
+	}
+}
+
+// An hourly sync must not chew through the retained snapshots. Backups are
+// throttled independently of how often the mailbox is checked.
+func TestBackupThrottledIndependentlyOfSync(t *testing.T) {
+	s := &scheduler{every: time.Hour}
+
+	if !s.dueForBackup() {
+		t.Fatal("the first run should take a backup")
+	}
+	s.markBackedUp()
+
+	if s.dueForBackup() {
+		t.Error("a backup was taken moments ago; another is not due")
+	}
+
+	// Simulate a day passing.
+	s.mu.Lock()
+	s.lastBackup = time.Now().Add(-21 * time.Hour)
+	s.mu.Unlock()
+	if !s.dueForBackup() {
+		t.Error("after 21 hours a backup should be due again")
+	}
+}
+
+// A misconfigured interval must be rejected loudly rather than silently
+// falling back to some other cadence.
+func TestSyncIntervalValidation(t *testing.T) {
+	for _, bad := range []string{"hourly", "1", "0s", "30s", "-1h"} {
+		cfg := &config.Config{SyncEvery: bad, SyncTZ: "Europe/London"}
+		if _, err := newScheduler(cfg, nil); err == nil {
+			t.Errorf("interval %q was accepted; it must be rejected", bad)
+		}
+	}
+	for _, good := range []string{"1h", "30m", "2h30m", "1m"} {
+		cfg := &config.Config{SyncEvery: good, SyncTZ: "Europe/London"}
+		s, err := newScheduler(cfg, nil)
+		if err != nil {
+			t.Errorf("interval %q was rejected: %v", good, err)
+			continue
+		}
+		if s == nil || s.every == 0 {
+			t.Errorf("interval %q did not enable interval mode", good)
+		}
 	}
 }
