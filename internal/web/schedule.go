@@ -223,6 +223,14 @@ func (s *scheduler) fire() {
 		}
 		s.recordSuccess(st.Summary())
 		logLine(st.Summary())
+		// The job console (logLine) only ever reaches someone with the
+		// dashboard open. Without this, a successful scheduled sync left
+		// "scheduled mailbox sync started" as the only trace in the system
+		// log — no way to confirm from the journal alone that the hourly
+		// sync actually ran, or what it found. Failures already get an
+		// ALERT line from recordFailure; this is the matching line for when
+		// nothing went wrong.
+		log.Printf("scheduled mailbox sync finished in %s: %s", time.Since(now).Round(time.Millisecond), st.Summary())
 		return st.Summary(), nil
 	})
 	if err != nil {
