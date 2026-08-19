@@ -70,6 +70,7 @@ if [ -n "$WITH_DATA" ]; then
     rm -f /tmp/goldstar-data.tgz
     ssh "$TARGET" "
       set -e
+      OLD_DIR='$HERE'
       cd '$REMOTE_DIR'
       if [ -f data/goldstar.db ]; then
         echo '    server already has a database — leaving it alone'
@@ -77,9 +78,27 @@ if [ -n "$WITH_DATA" ]; then
       else
         tar xzf goldstar-data.tgz && rm goldstar-data.tgz
         # Attachment paths are absolute and still point at the old machine.
-        sqlite3 data/goldstar.db \"UPDATE invoices SET source_file =
-          replace(source_file, '$HERE/data', '$REMOTE_DIR/data');\" 2>/dev/null || true
-        echo '    data restored and attachment paths rewritten'
+        # This must not be skipped quietly: without it every 'Open original'
+        # link is broken, and nothing else would reveal that.
+        if ! command -v sqlite3 >/dev/null 2>&1; then
+          echo '    installing sqlite3 (needed to rewrite attachment paths)'
+          DEBIAN_FRONTEND=noninteractive apt-get -qq update >/dev/null 2>&1 || true
+          DEBIAN_FRONTEND=noninteractive apt-get -qq install -y sqlite3 >/dev/null 2>&1 || true
+        fi
+        if command -v sqlite3 >/dev/null 2>&1; then
+          sqlite3 data/goldstar.db \"
+            UPDATE invoices SET source_file = replace(source_file, '\$OLD_DIR/data', '$REMOTE_DIR/data');
+            UPDATE examples SET source_file = replace(source_file, '\$OLD_DIR/data', '$REMOTE_DIR/data');\"
+          LEFT=\$(sqlite3 data/goldstar.db \"SELECT COUNT(*) FROM invoices WHERE source_file LIKE '\$OLD_DIR%';\")
+          if [ \"\$LEFT\" != 0 ]; then
+            echo \"    WARNING: \$LEFT attachment path(s) still point at the old machine\"
+          else
+            echo '    data restored and attachment paths rewritten'
+          fi
+        else
+          echo '    WARNING: sqlite3 unavailable — attachment paths NOT rewritten.'
+          echo '             Open original will fail until they are fixed by hand.'
+        fi
       fi
     "
   fi
