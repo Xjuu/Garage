@@ -297,3 +297,58 @@ func TestCheckpointFoldsWALIntoTheDatabase(t *testing.T) {
 		t.Errorf("after checkpoint and discarding the WAL, %d of 25 invoices survived", n)
 	}
 }
+
+// O and 0 are indistinguishable on a plate but are different vehicles to the
+// database, so one mistyped character splits a car's cost history in two. The
+// correction is applied only where the UK format makes the intent certain.
+func TestNormalizeRegFixesConfusableCharacters(t *testing.T) {
+	cases := []struct{ in, want, why string }{
+		// The case that actually occurred.
+		{"FG210XA", "FG21OXA", "zero in the trailing letters becomes O"},
+		{"FG21OXA", "FG21OXA", "the correct spelling is left alone"},
+
+		{"MJ65VJ2", "MJ65VJ2", "a digit that is not 0 or 1 is not touched"},
+		{"MJ65VJ0", "MJ65VJO", "trailing zero becomes O"},
+		{"MJ65VJ1", "MJ65VJI", "trailing one becomes I"},
+		{"MJO5VJZ", "MJ05VJZ", "letter O where a digit belongs becomes zero"},
+		{"MJI5VJZ", "MJ15VJZ", "letter I where a digit belongs becomes one"},
+		{"0J65VJZ", "OJ65VJZ", "leading zero becomes O"},
+
+		// Anything that would not become a valid plate is left as typed.
+		{"ABCDEFG", "", "no digit at all is not a registration"},
+		{"A1", "A1", "too short to judge"},
+		{"J99NUS", "J99NUS", "older format, untouched"},
+		{"FAZ4101", "FAZ4101", "personalised plate, not the standard shape"},
+		{"IGZ3356", "IGZ3356", "not the standard shape, left alone"},
+	}
+	for _, c := range cases {
+		if got := NormalizeReg(c.in); got != c.want {
+			t.Errorf("NormalizeReg(%q) = %q, want %q — %s", c.in, got, c.want, c.why)
+		}
+	}
+}
+
+// The two spellings must land on the same vehicle, or the costs stay split.
+func TestConfusableSpellingsShareOneVehicle(t *testing.T) {
+	db := open(t)
+
+	add(t, db, Invoice{InvoiceNumber: "A", VehicleReg: NormalizeReg("FG21OXA"),
+		InvoiceDate: "2026-08-17", Brutto: 100})
+	add(t, db, Invoice{InvoiceNumber: "B", VehicleReg: NormalizeReg("FG210XA"),
+		InvoiceDate: "2026-08-18", Brutto: 104.24})
+
+	rows, err := db.Vehicles()
+	if err != nil {
+		t.Fatalf("vehicles: %v", err)
+	}
+	if len(rows) != 1 {
+		regs := make([]string, len(rows))
+		for i, r := range rows {
+			regs[i] = r.VehicleReg
+		}
+		t.Fatalf("the two spellings produced %d vehicles (%v), want 1", len(rows), regs)
+	}
+	if rows[0].Brutto != 204.24 {
+		t.Errorf("gross = %v, want 204.24 — the spend was split", rows[0].Brutto)
+	}
+}

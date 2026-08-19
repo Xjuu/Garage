@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -21,6 +22,58 @@ func NormalizeReg(s string) string {
 	s = strings.NewReplacer(" ", "", "-", "", ".", "", "/", "", ",", "").Replace(s)
 	if !strings.ContainsFunc(s, unicode.IsDigit) {
 		return ""
+	}
+	return fixConfusable(s)
+}
+
+// ukPlate is the current UK format: two letters, two digits, three letters.
+var ukPlate = regexp.MustCompile(`^[A-Z]{2}[0-9]{2}[A-Z]{3}$`)
+
+// fixConfusable repairs the one typo this system cannot afford: O typed as 0,
+// or I as 1, in a registration.
+//
+// In a plate the two are indistinguishable by eye, but to the database they
+// are different vehicles — so a single mistyped character silently splits a
+// car's cost history in two and leaves half of it under a plate nobody
+// recognises. That already happened here with FG21OXA and FG210XA.
+//
+// The correction is applied only where the format makes the intent certain:
+// positions three and four are always digits, the last three always letters.
+// A value that does not become a valid plate is returned untouched, so
+// personalised and older-format registrations are never rewritten.
+func fixConfusable(s string) string {
+	if len(s) != 7 || ukPlate.MatchString(s) {
+		return s
+	}
+
+	b := []byte(s)
+	for i := 0; i < 2; i++ { // leading letters
+		switch b[i] {
+		case '0':
+			b[i] = 'O'
+		case '1':
+			b[i] = 'I'
+		}
+	}
+	for i := 2; i < 4; i++ { // the two digits
+		switch b[i] {
+		case 'O':
+			b[i] = '0'
+		case 'I':
+			b[i] = '1'
+		}
+	}
+	for i := 4; i < 7; i++ { // trailing letters
+		switch b[i] {
+		case '0':
+			b[i] = 'O'
+		case '1':
+			b[i] = 'I'
+		}
+	}
+
+	if fixed := string(b); ukPlate.MatchString(fixed) {
+		return fixed
 	}
 	return s
 }
