@@ -409,3 +409,11 @@ func boolToInt(b bool) int {
 	}
 	return 0
 }
+
+// Checkpoint flushes the write-ahead log into the main database file. Called
+// on a clean shutdown so the .db on disk stands alone, which matters when the
+// next thing to touch it is a backup or a file copy rather than SQLite itself.
+func (s *Store) Checkpoint() error {
+	_, err := s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	return err
+}

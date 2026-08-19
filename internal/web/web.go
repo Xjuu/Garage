@@ -70,7 +70,14 @@ func New(cfg *config.Config, db *store.Store) (*Server, error) {
 	}, nil
 }
 
-func (s *Server) Listen(addr string) error {
+// Listen serves until ctx is cancelled, then shuts down cleanly.
+//
+// The clean shutdown is not cosmetic. Without it the process ignores SIGTERM
+// entirely — signal.NotifyContext removes Go's default terminate behaviour, so
+// a captured-but-unwatched signal leaves the process running until systemd
+// gives up after 90 seconds and sends SIGKILL. A hard kill mid-write is
+// exactly the situation a database should never be put in.
+func (s *Server) Listen(ctx context.Context, addr string) error {
 	sub, err := fs.Sub(assets, "assets")
 	if err != nil {
 		return err
@@ -159,7 +166,36 @@ func (s *Server) Listen(addr string) error {
 		fmt.Printf("\n  Note: set GOLDSTAR_COOKIE_SECURE=true before serving through a tunnel.\n")
 	}
 	fmt.Printf("\n  Ctrl-C to stop.\n\n")
-	return srv.Serve(ln)
+	// Serve in the background so this goroutine can wait on the signal.
+	errc := make(chan error, 1)
+	go func() {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			errc <- err
+		}
+		close(errc)
+	}()
+
+	select {
+	case err := <-errc:
+		return err
+	case <-ctx.Done():
+	}
+
+	log.Print("shutting down")
+	// Bounded, so a wedged request cannot hold the process past systemd's
+	// patience and turn a clean stop back into a SIGKILL.
+	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutCtx); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
+
+	// Checkpoint the write-ahead log so the database file is complete on disk
+	// rather than depending on recovery at next start.
+	if err := s.db.Checkpoint(); err != nil {
+		log.Printf("wal checkpoint: %v", err)
+	}
+	return nil
 }
 
 // securityHeaders sets a strict CSP. The front end ships no inline scripts, so

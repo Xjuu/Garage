@@ -1,6 +1,8 @@
 package store
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -249,5 +251,49 @@ func TestThisMonthSeparatesCreditNotes(t *testing.T) {
 	}
 	if m.CreditCount != 1 {
 		t.Errorf("credit count = %d, want 1", m.CreditCount)
+	}
+}
+
+// A clean shutdown checkpoints the write-ahead log so the .db file is complete
+// on its own. Without this the file can be copied or backed up while rows live
+// only in the -wal, and the copy silently omits them.
+func TestCheckpointFoldsWALIntoTheDatabase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	for i := range 25 {
+		add(t, db, Invoice{
+			InvoiceNumber: fmt.Sprintf("INV-%03d", i),
+			InvoiceDate:   "2026-08-19", Brutto: float64(i + 1),
+		})
+	}
+
+	if err := db.Checkpoint(); err != nil {
+		t.Fatalf("checkpoint: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Open the file with the -wal deleted: anything not folded in is gone.
+	os.Remove(path + "-wal")
+	os.Remove(path + "-shm")
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer again.Close()
+
+	var n int
+	if err := again.db.QueryRow(`SELECT COUNT(*) FROM invoices`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 25 {
+		t.Errorf("after checkpoint and discarding the WAL, %d of 25 invoices survived", n)
 	}
 }

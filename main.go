@@ -157,7 +157,7 @@ func realMain(cmd string) error {
 		if err != nil {
 			return err
 		}
-		return srv.Listen(cfg.WebAddr)
+		return srv.Listen(ctx, cfg.WebAddr)
 	case "models":
 		if err := cfg.RequireGemini(); err != nil {
 			return err
