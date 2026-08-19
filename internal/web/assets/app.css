@@ -886,5 +886,16 @@ tr:hover .veh .car, .veh:hover .car { opacity: 1; }
 /* Supplied artwork sits in the same box as the drawn silhouettes so rows keep
    their alignment whichever is in use. It cannot invert with the theme — a
    photograph has no notion of currentColor — which is the trade for using it. */
-.car.art { object-fit: contain; object-position: left center; }
-.car.art.lg { width: 78px; height: 33px; }
+/* Supplied artwork is a square tile rather than a wide silhouette, so it gets
+   its own box: a chip that keeps every row the same height whichever kind of
+   icon is in use. Sized in CSS with width and height also set on the element,
+   so the row never reflows as images arrive. */
+.car.art {
+  width: 38px; height: 38px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--g05);
+  opacity: 1;
+}
+.car.art.lg { width: 64px; height: 64px; border-radius: 12px; }
+.veh .car.art { opacity: 1; }

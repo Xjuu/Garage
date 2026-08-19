@@ -1,6 +1,9 @@
 package web
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -45,12 +48,27 @@ func validStyle(style string) bool {
 	return false
 }
 
-// listIcons tells the front end which styles have artwork, so it can fall back
-// to the built-in drawing for the rest rather than showing a broken image.
+// iconVersion is a short fingerprint of the file's size and modification time.
+// It goes in the URL so an icon can be cached forever and still update the
+// moment it is replaced — the address changes, so no stale copy can survive.
+func iconVersion(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d-%d", info.Size(), info.ModTime().UnixNano())))
+	return hex.EncodeToString(sum[:])[:10]
+}
+
+// listIcons tells the front end which styles have artwork and at what version,
+// so it can fall back to the built-in drawing for the rest rather than showing
+// a broken image.
 func (s *Server) listIcons(r *http.Request) (any, error) {
-	have := map[string]bool{}
+	have := map[string]string{}
 	for _, style := range bodyStyles {
-		have[style] = s.iconPath(style) != ""
+		if p := s.iconPath(style); p != "" {
+			have[style] = iconVersion(p)
+		}
 	}
 	return map[string]any{
 		"styles": bodyStyles,
@@ -70,8 +88,15 @@ func (s *Server) fleetIcon(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(path, ".svg") {
 		w.Header().Set("Content-Type", "image/svg+xml")
 	}
-	// Artwork changes rarely but must not be stale after a replacement, so a
-	// short cache with revalidation rather than a long one.
-	w.Header().Set("Cache-Control", "public, max-age=60, must-revalidate")
+
+	// A request carrying the current fingerprint can be cached indefinitely:
+	// replacing the file changes the fingerprint, so the browser asks for a
+	// different URL rather than holding a stale image. Without one, fall back
+	// to revalidating, which is correct but costs a round trip per page.
+	if v := r.URL.Query().Get("v"); v != "" && v == iconVersion(path) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=300, must-revalidate")
+	}
 	http.ServeFile(w, r, path)
 }

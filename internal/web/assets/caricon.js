@@ -99,8 +99,13 @@ function carIcon(make, model, extraClass = '') {
   // someone has deliberately provided one.
   if (customIcons[style]) {
     const label = [make, model].filter(Boolean).join(' ') || 'vehicle';
-    return `<img class="car art ${esc(extraClass)}" src="/api/fleet-icon/${esc(style)}"
-                 alt="${esc(label)}" loading="lazy">`;
+    // The version in the query string lets the server mark the response
+    // immutable, so 300 rows sharing six images cost six requests once and
+    // nothing at all on every page after.
+    return `<img class="car art ${esc(extraClass)}"
+                 src="/api/fleet-icon/${esc(style)}?v=${esc(customIcons[style])}"
+                 alt="${esc(label)}" width="192" height="192"
+                 loading="lazy" decoding="async">`;
   }
 
   const shape = SHAPES[style];
