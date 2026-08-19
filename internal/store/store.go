@@ -1,0 +1,411 @@
+// Package store persists invoices in a local SQLite file. It uses the pure-Go
+// modernc.org/sqlite driver, so the binary needs no cgo and no system libsqlite
+// — that is what keeps Debian and CachyOS byte-identical.
+package store
+
+import (
+	"database/sql"
+	"fmt"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+type Store struct{ db *sql.DB }
+
+// Invoice is one invoice document, normally one PDF attachment.
+type Invoice struct {
+	ID          int64
+	FileSHA256  string
+	SourceFile  string
+	MailUID     int64
+	MailSubject string
+	MailFrom    string
+	MailDate    string
+
+	Supplier      string
+	InvoiceNumber string
+	InvoiceDate   string // ISO YYYY-MM-DD, the date of purchase
+	VehicleReg    string
+
+	Currency  string
+	Netto     float64
+	VATAmount float64
+	VATRate   float64
+	Brutto    float64
+
+	NeedsReview bool
+	// IsGeneral marks a purchase that is workshop stock — oil, WD-40,
+	// consumables — rather than work on one vehicle. Without it, every such
+	// invoice would be flagged for a missing registration.
+	IsGeneral bool
+	Notes     string
+	RawJSON   string
+	CreatedAt string
+
+	Items []Item
+}
+
+// Item is one line on an invoice. Part numbers live here because a single
+// invoice routinely lists many parts.
+type Item struct {
+	ID         int64
+	InvoiceID  int64
+	LineNo     int
+	PartNumber string
+	Desc       string
+	VehicleReg string
+	Quantity   float64
+	UnitPrice  float64
+	Netto      float64
+	VATAmount  float64
+	VATRate    float64
+	Brutto     float64
+}
+
+const schema = `
+PRAGMA journal_mode = WAL;
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS invoices (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  file_sha256    TEXT NOT NULL UNIQUE,
+  source_file    TEXT NOT NULL,
+  mail_uid       INTEGER,
+  mail_subject   TEXT,
+  mail_from      TEXT,
+  mail_date      TEXT,
+  supplier       TEXT,
+  invoice_number TEXT,
+  invoice_date   TEXT,
+  vehicle_reg    TEXT,
+  currency       TEXT,
+  netto          REAL,
+  vat_amount     REAL,
+  vat_rate       REAL,
+  brutto         REAL,
+  needs_review   INTEGER NOT NULL DEFAULT 0,
+  is_general     INTEGER NOT NULL DEFAULT 0,
+  notes          TEXT,
+  raw_json       TEXT,
+  created_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS invoice_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_id  INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+  line_no     INTEGER,
+  part_number TEXT,
+  description TEXT,
+  vehicle_reg TEXT,
+  quantity    REAL,
+  unit_price  REAL,
+  netto       REAL,
+  vat_amount  REAL,
+  vat_rate    REAL,
+  brutto      REAL
+);
+
+CREATE TABLE IF NOT EXISTS seen_messages (
+  mailbox      TEXT NOT NULL,
+  uid          INTEGER NOT NULL,
+  processed_at TEXT NOT NULL,
+  PRIMARY KEY (mailbox, uid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoices_date ON invoices(invoice_date);
+CREATE INDEX IF NOT EXISTS idx_invoices_reg  ON invoices(vehicle_reg);
+CREATE INDEX IF NOT EXISTS idx_items_part    ON invoice_items(part_number);
+CREATE INDEX IF NOT EXISTS idx_items_invoice ON invoice_items(invoice_id);
+
+-- Fleet ---------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS companies (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL UNIQUE,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+
+-- Keyed on the normalised registration (upper case, no spaces), which is the
+-- same form invoices.vehicle_reg is stored in, so the two always join.
+CREATE TABLE IF NOT EXISTS vehicles (
+  registration TEXT PRIMARY KEY,
+  company_id   INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+  make         TEXT NOT NULL DEFAULT '',
+  model        TEXT NOT NULL DEFAULT '',
+  year         TEXT NOT NULL DEFAULT '',
+  driver       TEXT NOT NULL DEFAULT '',
+  notes        TEXT NOT NULL DEFAULT '',
+  active       INTEGER NOT NULL DEFAULT 1,
+  created_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicles_company ON vehicles(company_id);
+
+-- Training ------------------------------------------------------------------
+
+-- One example invoice plus the corrected values a human typed in. These feed
+-- both the extraction prompt and the eval regression run.
+CREATE TABLE IF NOT EXISTS examples (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  file_sha256 TEXT NOT NULL UNIQUE,
+  filename    TEXT NOT NULL,
+  source_file TEXT NOT NULL,
+  mime_type   TEXT NOT NULL DEFAULT 'application/pdf',
+  supplier    TEXT NOT NULL DEFAULT '',
+  truth_json  TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'pending',
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+
+-- Free-text guidance injected only when that supplier is recognised, so the
+-- prompt stays small no matter how many suppliers accumulate.
+CREATE TABLE IF NOT EXISTS supplier_hints (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  supplier   TEXT NOT NULL UNIQUE,
+  hint       TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS eval_runs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at  TEXT NOT NULL,
+  finished_at TEXT NOT NULL DEFAULT '',
+  model       TEXT NOT NULL DEFAULT '',
+  examples    INTEGER NOT NULL DEFAULT 0,
+  fields_ok   INTEGER NOT NULL DEFAULT 0,
+  fields_all  INTEGER NOT NULL DEFAULT 0,
+  detail_json TEXT NOT NULL DEFAULT ''
+);
+`
+
+// seed inserts the fleet the user actually operates. Overall Clients is the
+// catch-all a newly seen registration lands in until someone assigns it.
+const seed = `
+INSERT OR IGNORE INTO companies (name, is_default, created_at) VALUES
+  ('GOLDSTAR DIAMOND CARS', 0, datetime('now')),
+  ('MFS MOTORGROUP',        0, datetime('now')),
+  ('Overall Clients',       1, datetime('now'));
+`
+
+func Open(path string) (*Store, error) {
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		return nil, fmt.Errorf("open db: %w", err)
+	}
+	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	if _, err := db.Exec(seed); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("seed companies: %w", err)
+	}
+	return &Store{db: db}, nil
+}
+
+// migrate adds columns introduced after a database was first created.
+// CREATE TABLE IF NOT EXISTS silently leaves an existing table alone, so new
+// columns have to be added explicitly or upgrades break on the old schema.
+func migrate(db *sql.DB) error {
+	added := map[string]string{
+		"is_general": "ALTER TABLE invoices ADD COLUMN is_general INTEGER NOT NULL DEFAULT 0",
+	}
+	have, err := columns(db, "invoices")
+	if err != nil {
+		return err
+	}
+	for col, stmt := range added {
+		if have[col] {
+			continue
+		}
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("add %s: %w", col, err)
+		}
+	}
+	return nil
+}
+
+func columns(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) Close() error { return s.db.Close() }
+
+// Vacuum compacts the database file, reclaiming space from deleted rows.
+func (s *Store) Vacuum() error {
+	_, err := s.db.Exec(`VACUUM`)
+	return err
+}
+
+// BackupTo writes a consistent snapshot to path. VACUUM INTO is safe on a live
+// WAL-mode database, which a plain file copy would not be.
+func (s *Store) BackupTo(path string) error {
+	_, err := s.db.Exec(`VACUUM INTO ?`, path)
+	return err
+}
+
+// HasFile reports whether this exact attachment was already ingested. Hashing
+// the bytes means a forwarded or resent invoice is never double-counted.
+func (s *Store) HasFile(sha string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(1) FROM invoices WHERE file_sha256 = ?`, sha).Scan(&n)
+	return n > 0, err
+}
+
+func (s *Store) IsMessageSeen(mailbox string, uid int64) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(1) FROM seen_messages WHERE mailbox = ? AND uid = ?`, mailbox, uid).Scan(&n)
+	return n > 0, err
+}
+
+func (s *Store) MarkMessageSeen(mailbox string, uid int64) error {
+	_, err := s.db.Exec(
+		`INSERT OR REPLACE INTO seen_messages (mailbox, uid, processed_at) VALUES (?, ?, ?)`,
+		mailbox, uid, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+// InsertInvoice writes the invoice and its line items in one transaction.
+func (s *Store) InsertInvoice(inv *Invoice) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(`
+		INSERT INTO invoices (
+			file_sha256, source_file, mail_uid, mail_subject, mail_from, mail_date,
+			supplier, invoice_number, invoice_date, vehicle_reg,
+			currency, netto, vat_amount, vat_rate, brutto,
+			needs_review, is_general, notes, raw_json, created_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		inv.FileSHA256, inv.SourceFile, inv.MailUID, inv.MailSubject, inv.MailFrom, inv.MailDate,
+		inv.Supplier, inv.InvoiceNumber, inv.InvoiceDate, inv.VehicleReg,
+		inv.Currency, inv.Netto, inv.VATAmount, inv.VATRate, inv.Brutto,
+		boolToInt(inv.NeedsReview), boolToInt(inv.IsGeneral), inv.Notes, inv.RawJSON,
+		time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, fmt.Errorf("insert invoice: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	for _, it := range inv.Items {
+		if _, err := tx.Exec(`
+			INSERT INTO invoice_items (
+				invoice_id, line_no, part_number, description, vehicle_reg,
+				quantity, unit_price, netto, vat_amount, vat_rate, brutto
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+			id, it.LineNo, it.PartNumber, it.Desc, it.VehicleReg,
+			it.Quantity, it.UnitPrice, it.Netto, it.VATAmount, it.VATRate, it.Brutto,
+		); err != nil {
+			return 0, fmt.Errorf("insert item: %w", err)
+		}
+	}
+	return id, tx.Commit()
+}
+
+// ListInvoices returns invoices with their items, newest purchase first.
+// An empty since/until pair means "everything".
+func (s *Store) ListInvoices(since, until string) ([]Invoice, error) {
+	q := `SELECT id, file_sha256, source_file, mail_uid, mail_subject, mail_from, mail_date,
+	             supplier, invoice_number, invoice_date, vehicle_reg,
+	             currency, netto, vat_amount, vat_rate, brutto,
+	             needs_review, is_general, notes, created_at
+	      FROM invoices`
+	var args []any
+	if since != "" && until != "" {
+		q += ` WHERE invoice_date >= ? AND invoice_date <= ?`
+		args = append(args, since, until)
+	}
+	q += ` ORDER BY COALESCE(NULLIF(invoice_date,''), created_at) DESC, id DESC`
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Invoice
+	for rows.Next() {
+		v, err := scanInvoice(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for i := range out {
+		items, err := s.itemsFor(out[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		out[i].Items = items
+	}
+	return out, nil
+}
+
+func (s *Store) itemsFor(invoiceID int64) ([]Item, error) {
+	rows, err := s.db.Query(`
+		SELECT id, invoice_id, line_no, part_number, description, vehicle_reg,
+		       quantity, unit_price, netto, vat_amount, vat_rate, brutto
+		FROM invoice_items WHERE invoice_id = ? ORDER BY line_no, id`, invoiceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Item
+	for rows.Next() {
+		var it Item
+		if err := rows.Scan(&it.ID, &it.InvoiceID, &it.LineNo, &it.PartNumber, &it.Desc,
+			&it.VehicleReg, &it.Quantity, &it.UnitPrice, &it.Netto, &it.VATAmount,
+			&it.VATRate, &it.Brutto); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) Counts() (invoices, items int, err error) {
+	if err = s.db.QueryRow(`SELECT COUNT(1) FROM invoices`).Scan(&invoices); err != nil {
+		return
+	}
+	err = s.db.QueryRow(`SELECT COUNT(1) FROM invoice_items`).Scan(&items)
+	return
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}

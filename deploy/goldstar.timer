@@ -1,0 +1,17 @@
+[Unit]
+Description=Run the Garage Goldstar invoice collector daily
+Documentation=file://%h/Code/Garage-Goldstar/README.md
+
+[Timer]
+# Every evening. Change with: systemctl --edit --user goldstar.timer
+OnCalendar=*-*-* 19:00:00
+
+# If the machine was off at 19:00, run once it next comes up. Without this a
+# laptop that was closed all evening would silently skip the day.
+Persistent=true
+
+# Avoid hammering the API at exactly the same second every day.
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

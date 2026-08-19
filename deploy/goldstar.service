@@ -1,0 +1,33 @@
+[Unit]
+Description=Garage Goldstar invoice collector (fetch + Excel export)
+Documentation=file://%h/Code/Garage-Goldstar/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=__BINDIR__/goldstar run
+# Settings and data live beside the binary; see WorkingDirectory below.
+WorkingDirectory=__BINDIR__
+
+# Do not let a stuck IMAP or API call hold the timer open.
+TimeoutStartSec=30min
+
+# Hardening. The job only needs its own data and config directories.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=__BINDIR__
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=default.target

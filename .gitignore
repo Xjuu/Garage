@@ -1,0 +1,23 @@
+# Secrets — never commit
+.env
+*.env
+!.env.example
+
+# Built binary
+/goldstar
+
+# Local data, should this ever be pointed at the repo
+/data/
+*.db
+*.db-wal
+*.db-shm
+*.xlsx
+
+# Leftovers from the earlier Node prototype
+/node_modules/
+
+# Local installation data — database, attachments, exports, credentials.
+/.env
+
+# Session signing key — has no extension, so the rules above miss it.
+session.key

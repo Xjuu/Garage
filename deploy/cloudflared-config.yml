@@ -1,0 +1,25 @@
+# Cloudflare Tunnel configuration for the Goldstar dashboard.
+#
+# Copy to ~/.cloudflared/config.yml and replace the placeholders.
+# Create the tunnel first:
+#
+#   cloudflared tunnel login
+#   cloudflared tunnel create goldstar
+#   cloudflared tunnel route dns goldstar invoices.yourdomain.co.uk
+#
+# `tunnel create` prints the tunnel UUID and writes the credentials JSON.
+
+tunnel: __TUNNEL_UUID__
+credentials-file: __HOME__/.cloudflared/__TUNNEL_UUID__.json
+
+# Only answer for the hostname we own; everything else gets a 404 rather
+# than being quietly proxied.
+ingress:
+  - hostname: invoices.yourdomain.co.uk
+    service: http://127.0.0.1:8787
+    originRequest:
+      # The dashboard stays on loopback. cloudflared is the only thing that
+      # reaches it, and it does so over the loopback interface.
+      connectTimeout: 30s
+      noTLSVerify: false
+  - service: http_status:404

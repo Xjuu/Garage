@@ -1,0 +1,760 @@
+/* Goldstar dashboard. No framework, no build step — the whole front end is
+   this file plus app.css, embedded in the Go binary. */
+
+'use strict';
+
+// ── helpers ───────────────────────────────────────────────────────────────
+
+const $ = (id) => document.getElementById(id);
+
+/** Escape anything that came out of a PDF before it reaches innerHTML.
+    Supplier names and descriptions are model output from an untrusted
+    document, so they are never trusted as markup. */
+function esc(v) {
+  if (v === null || v === undefined) return '';
+  return String(v)
+    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+}
+
+const nf = new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const nf0 = new Intl.NumberFormat('en-GB');
+
+const money = (n) => nf.format(Number(n) || 0);
+const int = (n) => nf0.format(Number(n) || 0);
+const dash = (s) => (s === '' || s === null || s === undefined ? '<span class="muted">—</span>' : esc(s));
+
+function readCookie(name) {
+  return document.cookie.split('; ')
+    .find((c) => c.startsWith(name + '='))?.split('=')[1] || '';
+}
+
+/** Every mutating call carries the CSRF cookie back as a header; the session
+    cookie itself stays HttpOnly. */
+async function api(path, opts = {}) {
+  const o = { headers: {}, ...opts };
+  if (o.method && o.method !== 'GET') {
+    o.headers['X-CSRF-Token'] = readCookie('goldstar_csrf');
+  }
+  if (o.json !== undefined) {
+    o.headers['Content-Type'] = 'application/json';
+    o.body = JSON.stringify(o.json);
+    delete o.json;
+  }
+  const res = await fetch(path, o);
+  if (res.status === 401) { location.href = '/'; throw new Error('signed out'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
+  return data;
+}
+
+function toast(msg, bad = false) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (bad ? ' bad' : '');
+  el.textContent = msg;
+  $('toasts').appendChild(el);
+  setTimeout(() => el.remove(), bad ? 6000 : 3200);
+}
+
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+// ── state ─────────────────────────────────────────────────────────────────
+
+const state = {
+  view: 'overview',
+  filters: { q: '', from: '', to: '', supplier: '', reg: '', review: '' },
+  sort: 'date',
+  dir: 'desc',
+  page: 1,
+  per: 50,
+  total: 0,
+  current: null,   // invoice open in the drawer
+  parts: [],
+  jobTimer: null,
+};
+
+function queryString(extra = {}) {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(state.filters)) if (v) p.set(k, v);
+  p.set('sort', state.sort);
+  p.set('dir', state.dir);
+  p.set('page', state.page);
+  p.set('per', state.per);
+  for (const [k, v] of Object.entries(extra)) p.set(k, v);
+  return p.toString();
+}
+
+// ── navigation ────────────────────────────────────────────────────────────
+
+/* Navigation is two levels. Eleven top-level tabs meant the everyday pages —
+   invoices, a car's costs — sat in the same undifferentiated row as things you
+   touch once a month, like Training. Grouping puts five choices in the top row
+   and hides the rest until they are relevant. */
+const GROUPS = [
+  { id: 'overview', label: 'Overview', views: [['overview', 'Overview']] },
+  { id: 'invoices', label: 'Invoices', count: 'c-invoices', views: [['invoices', 'Invoices']] },
+  {
+    id: 'analysis', label: 'Analysis',
+    views: [
+      ['spending', 'Spending'],
+      ['vehicles', 'Vehicles', 'c-vehicles'],
+      ['parts', 'Parts', 'c-parts'],
+      ['suppliers', 'Suppliers', 'c-suppliers'],
+      ['vat', 'VAT'],
+    ],
+  },
+  {
+    id: 'setup', label: 'Setup',
+    views: [
+      ['fleet', 'Fleet'],
+      ['training', 'Training', 'c-training'],
+      ['admin', 'Admin'],
+    ],
+  },
+];
+
+// Detail pages are reached by clicking a row, not from the nav, but they still
+// need to light up the group they belong to.
+const EXTRA_VIEWS = { vehicle: 'analysis', part: 'analysis' };
+
+const groupOf = {};
+for (const g of GROUPS) for (const [view] of g.views) groupOf[view] = g.id;
+Object.assign(groupOf, EXTRA_VIEWS);
+
+function buildNav() {
+  $('tabs').innerHTML = GROUPS.map((g) => `
+    <button role="tab" data-group="${g.id}" data-view="${g.views[0][0]}">
+      ${esc(g.label)}${g.count ? `<span class="count" id="${g.count}">0</span>` : ''}
+    </button>`).join('');
+
+  // Every sub-tab is rendered up front, including for inactive groups: the
+  // count badges carry ids that other modules write into, and those must exist
+  // whether or not the group is on screen.
+  $('subtabs').innerHTML = GROUPS
+    .filter((g) => g.views.length > 1)
+    .map((g) => g.views.map(([view, label, count]) => `
+      <button data-group="${g.id}" data-view="${view}" hidden>
+        ${esc(label)}${count ? `<span class="count" id="${count}">0</span>` : ''}
+      </button>`).join('')).join('');
+
+  document.querySelectorAll('#tabs button, #subtabs button').forEach((b) =>
+    b.addEventListener('click', () => show(b.dataset.view)));
+}
+
+function show(view) {
+  state.view = view;
+  const group = groupOf[view] || 'overview';
+
+  document.querySelectorAll('#tabs button').forEach((b) =>
+    b.setAttribute('aria-selected', String(b.dataset.group === group)));
+
+  document.querySelectorAll('#subtabs button').forEach((b) => {
+    b.hidden = b.dataset.group !== group;
+    b.setAttribute('aria-selected', String(b.dataset.view === view));
+  });
+
+  document.querySelectorAll('.view').forEach((s) =>
+    s.classList.toggle('active', s.id === 'view-' + view));
+  loadView(view);
+}
+
+// Mutable so the fleet, training and admin modules can register their own
+// views without this file needing to know about them.
+const viewLoaders = {};
+
+function loadView(view) {
+  viewLoaders[view]?.().catch((e) => toast(e.message, true));
+}
+
+buildNav();
+
+// ── overview ──────────────────────────────────────────────────────────────
+
+async function loadOverview() {
+  const res = await api('/api/overview');
+  const o = res.overview;
+  renderThisMonth(res.this_month);
+
+  $('c-invoices').textContent = int(o.invoices);
+  $('c-vehicles').textContent = int(o.vehicles);
+  $('c-suppliers').textContent = int(o.suppliers);
+  $('overview-sub').textContent =
+    `${int(o.invoices)} invoices · ${int(o.items)} line items`;
+
+  const tiles = [
+    { k: 'Invoices', v: int(o.invoices) },
+    { k: 'Net spend', v: '£' + money(o.netto) },
+    { k: 'VAT', v: '£' + money(o.vat), m: 'reclaimable input VAT' },
+    { k: 'Gross spend', v: '£' + money(o.brutto) },
+    { k: 'Vehicles', v: int(o.vehicles) },
+    { k: 'Line items', v: int(o.items) },
+  ];
+  if (o.needs_review > 0) {
+    tiles.push({ k: 'Needs review', v: int(o.needs_review), m: 'figures did not reconcile', alert: true });
+  }
+  $('tiles').innerHTML = tiles.map((t) => `
+    <div class="tile${t.alert ? ' alert' : ''}">
+      <div class="k">${esc(t.k)}</div>
+      <div class="v">${t.v}</div>
+      ${t.m ? `<div class="m">${esc(t.m)}</div>` : ''}
+    </div>`).join('');
+
+  // Months arrive newest-first; a chart reads left-to-right oldest-first.
+  const months = [...(o.months || [])].reverse();
+  drawChart('bars', months.map((m) => ({
+    label: m.month.slice(2),
+    value: m.brutto,
+    title: `${m.month} — £${money(m.brutto)} across ${int(m.invoices)} invoice(s)`,
+  })));
+
+  const vehicles = await api('/api/vehicles');
+  $('top-vehicles').innerHTML = vehicles.length
+    ? vehicles.slice(0, 8).map((v) => `
+        <tr class="clickable" data-reg="${esc(v.vehicle_reg)}">
+          <td><span class="reg">${esc(v.vehicle_reg)}</span></td>
+          <td class="num">${int(v.invoices)}</td>
+          <td class="num">${int(v.parts)}</td>
+          <td class="num">${money(v.netto)}</td>
+          <td class="num">${money(v.vat)}</td>
+          <td class="num strong">${money(v.brutto)}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="6" class="empty">No vehicle registrations recorded yet</td></tr>';
+
+  $('top-vehicles').querySelectorAll('tr[data-reg]').forEach((tr) =>
+    tr.addEventListener('click', () => openVehicle(tr.dataset.reg)));
+}
+
+// ── invoices ──────────────────────────────────────────────────────────────
+
+async function loadInvoices() {
+  const data = await api('/api/invoices?' + queryString());
+  state.total = data.total;
+
+  $('inv-sub').textContent =
+    `${int(data.total)} matching · net £${money(data.netto)} · VAT £${money(data.vat)} · gross £${money(data.brutto)}`;
+
+  $('inv-rows').innerHTML = data.invoices.length
+    ? data.invoices.map((inv) => {
+        const parts = (inv.Items || [])
+          .map((i) => i.PartNumber).filter(Boolean);
+        const shown = parts.slice(0, 2).map((p) => `<span class="part">${esc(p)}</span>`).join(' ');
+        const more = parts.length > 2 ? ` <span class="muted">+${parts.length - 2}</span>` : '';
+        return `
+        <tr class="clickable${inv.NeedsReview ? ' flagged' : ''}" data-id="${inv.ID}">
+          <td class="mono">${dash(inv.InvoiceDate)}</td>
+          <td class="truncate" title="${esc(inv.Supplier)}">${dash(inv.Supplier)}</td>
+          <td class="mono">${dash(inv.InvoiceNumber)}</td>
+          <td>${inv.VehicleReg ? `<span class="reg">${esc(inv.VehicleReg)}</span>` : '<span class="muted">—</span>'}</td>
+          <td>${shown || '<span class="muted">—</span>'}${more}</td>
+          <td class="num">${money(inv.Netto)}</td>
+          <td class="num">${money(inv.VATAmount)}</td>
+          <td class="num strong">${money(inv.Brutto)}</td>
+          <td>${inv.NeedsReview ? '<span class="pill flag">Check</span>' : ''}</td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="9" class="empty">
+         <strong>Nothing to show</strong>
+         Sync the mailbox, or drop an invoice above to get started.
+       </td></tr>`;
+
+  $('inv-rows').querySelectorAll('tr[data-id]').forEach((tr) =>
+    tr.addEventListener('click', () => openInvoice(tr.dataset.id)));
+
+  const from = data.total === 0 ? 0 : (state.page - 1) * state.per + 1;
+  const to = Math.min(state.page * state.per, data.total);
+  $('inv-info').textContent = `${int(from)}–${int(to)} of ${int(data.total)}`;
+  $('page-prev').disabled = state.page <= 1;
+  $('page-next').disabled = state.page * state.per >= data.total;
+
+  document.querySelectorAll('th.sortable').forEach((th) => {
+    const on = th.dataset.sort === state.sort;
+    th.classList.toggle('sorted', on);
+    th.querySelector('.arrow').textContent = on && state.dir === 'asc' ? '↑' : '↓';
+  });
+}
+
+document.querySelectorAll('th.sortable').forEach((th) =>
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    if (state.sort === col) {
+      state.dir = state.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      state.sort = col;
+      state.dir = 'desc';
+    }
+    state.page = 1;
+    loadInvoices().catch((e) => toast(e.message, true));
+  }));
+
+const refilter = debounce(() => {
+  state.page = 1;
+  loadInvoices().catch((e) => toast(e.message, true));
+}, 260);
+
+$('f-q').addEventListener('input', (e) => { state.filters.q = e.target.value; refilter(); });
+for (const [id, key] of [['f-from', 'from'], ['f-to', 'to'], ['f-supplier', 'supplier'],
+                         ['f-reg', 'reg'], ['f-review', 'review']]) {
+  $(id).addEventListener('change', (e) => {
+    state.filters[key] = e.target.value;
+    state.page = 1;
+    loadInvoices().catch((err) => toast(err.message, true));
+  });
+}
+
+$('f-clear').addEventListener('click', () => {
+  state.filters = { q: '', from: '', to: '', supplier: '', reg: '', review: '' };
+  ['f-q', 'f-from', 'f-to', 'f-supplier', 'f-reg', 'f-review'].forEach((id) => { $(id).value = ''; });
+  state.page = 1;
+  loadInvoices().catch((e) => toast(e.message, true));
+});
+
+$('page-prev').addEventListener('click', () => {
+  if (state.page > 1) { state.page--; loadInvoices().catch((e) => toast(e.message, true)); }
+});
+$('page-next').addEventListener('click', () => {
+  if (state.page * state.per < state.total) { state.page++; loadInvoices().catch((e) => toast(e.message, true)); }
+});
+
+function filterByVehicle(reg) {
+  state.filters = { q: '', from: '', to: '', supplier: '', reg, review: '' };
+  $('f-reg').value = reg;
+  $('f-q').value = '';
+  state.page = 1;
+  show('invoices');
+}
+
+function filterBySupplier(supplier) {
+  state.filters = { q: '', from: '', to: '', supplier, reg: '', review: '' };
+  $('f-supplier').value = supplier;
+  $('f-q').value = '';
+  state.page = 1;
+  show('invoices');
+}
+
+function searchFor(text) {
+  state.filters = { q: text, from: '', to: '', supplier: '', reg: '', review: '' };
+  $('f-q').value = text;
+  ['f-supplier', 'f-reg', 'f-review'].forEach((id) => { $(id).value = ''; });
+  state.page = 1;
+  show('invoices');
+}
+
+async function loadFilters() {
+  const f = await api('/api/filters');
+  const fill = (id, values, current) => {
+    $(id).innerHTML = '<option value="">All</option>' +
+      values.map((v) => `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(v)}</option>`).join('');
+  };
+  fill('f-supplier', f.suppliers, state.filters.supplier);
+  fill('f-reg', f.vehicles, state.filters.reg);
+}
+
+// ── drawer ────────────────────────────────────────────────────────────────
+
+function field(label, key, value, type = 'text') {
+  return `<div class="field">
+    <label for="e-${key}">${esc(label)}</label>
+    <input type="${type}" id="e-${key}" data-key="${key}" value="${esc(value)}"
+           ${type === 'number' ? 'step="0.01"' : ''}>
+  </div>`;
+}
+
+async function openInvoice(id) {
+  try {
+    const inv = await api('/api/invoices/' + id);
+    state.current = inv;
+
+    $('d-title').textContent = `${inv.Supplier || 'Invoice'} · ${inv.InvoiceNumber || '#' + inv.ID}`;
+
+    const items = (inv.Items || []).map((it) => `
+      <tr>
+        <td>${it.PartNumber ? `<span class="part">${esc(it.PartNumber)}</span>` : '<span class="muted">—</span>'}</td>
+        <td class="truncate" title="${esc(it.Desc)}">${dash(it.Desc)}</td>
+        <td class="num">${it.Quantity ? int(it.Quantity) : '—'}</td>
+        <td class="num">${money(it.UnitPrice)}</td>
+        <td class="num">${money(it.Netto)}</td>
+        <td class="num">${money(it.VATAmount)}</td>
+        <td class="num strong">${money(it.Brutto)}</td>
+      </tr>`).join('');
+
+    $('d-body').innerHTML = `
+      ${inv.NeedsReview && inv.Notes ? `<div class="note"><strong>Needs review.</strong> ${esc(inv.Notes)}</div>` : ''}
+
+      <div class="grid2">
+        ${field('Supplier', 'supplier', inv.Supplier)}
+        ${field('Invoice number', 'invoice_number', inv.InvoiceNumber)}
+        ${field('Date of purchase', 'invoice_date', inv.InvoiceDate, 'date')}
+        ${field('Vehicle registration', 'vehicle_reg', inv.VehicleReg)}
+        ${field('Currency', 'currency', inv.Currency)}
+        ${field('VAT rate %', 'vat_rate', inv.VATRate, 'number')}
+        ${field('Net', 'netto', inv.Netto, 'number')}
+        ${field('VAT', 'vat_amount', inv.VATAmount, 'number')}
+        ${field('Gross', 'brutto', inv.Brutto, 'number')}
+      </div>
+
+      <div class="section-title">Line items (${(inv.Items || []).length})</div>
+      <div class="panel"><div class="table-scroll"><table>
+        <thead><tr>
+          <th>Part</th><th>Description</th><th class="num">Qty</th><th class="num">Unit</th>
+          <th class="num">Net</th><th class="num">VAT</th><th class="num">Gross</th>
+        </tr></thead>
+        <tbody>${items || '<tr><td colspan="7" class="empty">No line items</td></tr>'}</tbody>
+      </table></div></div>
+
+      <div class="section-title">Provenance</div>
+      <div class="panel" style="padding:14px 16px;font-size:13px;line-height:1.9">
+        <div><span class="muted">From</span> ${dash(inv.MailFrom)}</div>
+        <div><span class="muted">Subject</span> ${dash(inv.MailSubject)}</div>
+        <div><span class="muted">Archived file</span> <span class="mono">${dash((inv.SourceFile || '').split('/').pop())}</span></div>
+        <div><span class="muted">Checksum</span> <span class="mono">${esc((inv.FileSHA256 || '').slice(0, 16))}…</span></div>
+      </div>`;
+
+    // The source document is on disk, so this opens instantly and costs no API
+  // call — the model only ever reads each invoice once, at ingest.
+  $('d-original').href = '/api/invoices/' + inv.ID + '/file';
+  showDrawerFooter('invoice');
+    $('drawer').classList.add('open');
+    $('drawer').setAttribute('aria-hidden', 'false');
+    $('scrim').classList.add('open');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function closeDrawer() {
+  $('drawer').classList.remove('open');
+  $('drawer').setAttribute('aria-hidden', 'true');
+  $('scrim').classList.remove('open');
+  state.current = null;
+  state.editingVehicle = null;
+  state.editingExample = null;
+}
+
+/** The drawer is reused for invoices, vehicles and training examples, so only
+    the footer belonging to the current mode is shown. */
+function showDrawerFooter(mode) {
+  for (const name of ['invoice', 'vehicle', 'example']) {
+    $('drawer-foot-' + name).style.display = name === mode ? 'flex' : 'none';
+  }
+}
+
+$('d-close').addEventListener('click', closeDrawer);
+$('scrim').addEventListener('click', closeDrawer);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+
+$('d-save').addEventListener('click', async () => {
+  if (!state.current) return;
+  const patch = {};
+  $('d-body').querySelectorAll('input[data-key]').forEach((el) => {
+    patch[el.dataset.key] = el.type === 'number' ? Number(el.value) : el.value;
+  });
+  try {
+    await api('/api/invoices/' + state.current.ID, { method: 'PATCH', json: patch });
+    toast('Saved');
+    closeDrawer();
+    refreshAll();
+  } catch (e) { toast(e.message, true); }
+});
+
+$('d-reviewed').addEventListener('click', async () => {
+  if (!state.current) return;
+  try {
+    await api('/api/invoices/' + state.current.ID, {
+      method: 'PATCH', json: { needs_review: false },
+    });
+    toast('Marked reviewed');
+    closeDrawer();
+    refreshAll();
+  } catch (e) { toast(e.message, true); }
+});
+
+$('d-doc').addEventListener('click', () => {
+  if (state.current) window.open('/api/doc?id=' + state.current.ID, '_blank', 'noopener');
+});
+
+$('d-delete').addEventListener('click', async () => {
+  if (!state.current) return;
+  const label = `${state.current.Supplier || 'this invoice'} ${state.current.InvoiceNumber || ''}`.trim();
+  if (!confirm(`Delete ${label}?\n\nThe archived document stays on disk — only the extracted record is removed.`)) return;
+  try {
+    await api('/api/invoices/' + state.current.ID, { method: 'DELETE' });
+    toast('Deleted');
+    closeDrawer();
+    refreshAll();
+  } catch (e) { toast(e.message, true); }
+});
+
+// ── aggregate views ───────────────────────────────────────────────────────
+
+async function loadVehicles() {
+  const rows = await api('/api/vehicles');
+  $('c-vehicles').textContent = int(rows.length);
+  $('veh-rows').innerHTML = rows.length
+    ? rows.map((v) => `
+        <tr class="clickable" data-reg="${esc(v.vehicle_reg)}">
+          <td><span class="reg">${esc(v.vehicle_reg)}</span></td>
+          <td class="num">${int(v.invoices)}</td>
+          <td class="num">${int(v.parts)}</td>
+          <td class="num">${money(v.netto)}</td>
+          <td class="num">${money(v.vat)}</td>
+          <td class="num strong">${money(v.brutto)}</td>
+          <td class="mono">${dash(v.last_date)}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="7" class="empty"><strong>No vehicles yet</strong>Registrations appear once invoices name them.</td></tr>';
+
+  $('veh-rows').querySelectorAll('tr[data-reg]').forEach((tr) =>
+    tr.addEventListener('click', () => openVehicle(tr.dataset.reg)));
+}
+
+async function loadSuppliers() {
+  const rows = await api('/api/suppliers');
+  $('c-suppliers').textContent = int(rows.length);
+  $('sup-rows').innerHTML = rows.length
+    ? rows.map((s) => `
+        <tr class="clickable" data-supplier="${esc(s.supplier)}">
+          <td class="strong">${esc(s.supplier)}</td>
+          <td class="num">${int(s.invoices)}</td>
+          <td class="num">${money(s.netto)}</td>
+          <td class="num">${money(s.vat)}</td>
+          <td class="num strong">${money(s.brutto)}</td>
+          <td class="mono">${dash(s.last_date)}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="6" class="empty">No suppliers yet</td></tr>';
+
+  $('sup-rows').querySelectorAll('tr[data-supplier]').forEach((tr) =>
+    tr.addEventListener('click', () => filterBySupplier(tr.dataset.supplier)));
+}
+
+async function loadParts() {
+  state.parts = await api('/api/parts');
+  $('c-parts').textContent = int(state.parts.length);
+  renderParts();
+}
+
+function renderParts() {
+  const q = $('parts-filter').value.trim().toLowerCase();
+  const rows = q
+    ? state.parts.filter((p) =>
+        (p.part_number || '').toLowerCase().includes(q) ||
+        (p.description || '').toLowerCase().includes(q))
+    : state.parts;
+
+  $('part-rows').innerHTML = rows.length
+    ? rows.map((p) => `
+        <tr class="clickable" data-part="${esc(p.part_number)}">
+          <td><span class="part">${esc(p.part_number)}</span></td>
+          <td class="truncate" title="${esc(p.description)}">${dash(p.description)}</td>
+          <td class="num">${int(p.times)}</td>
+          <td class="num">${int(p.quantity)}</td>
+          <td class="num strong">${money(p.netto)}</td>
+          <td class="num">${int(p.vehicles)}</td>
+          <td class="mono">${dash(p.last_date)}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="7" class="empty">No parts match</td></tr>';
+
+  $('part-rows').querySelectorAll('tr[data-part]').forEach((tr) =>
+    tr.addEventListener('click', () => openPart(tr.dataset.part)));
+}
+
+$('parts-filter').addEventListener('input', debounce(renderParts, 160));
+
+async function loadVAT() {
+  const rows = await api('/api/months');
+  const t = rows.reduce((a, m) => ({
+    invoices: a.invoices + m.invoices, netto: a.netto + m.netto,
+    vat: a.vat + m.vat, brutto: a.brutto + m.brutto,
+  }), { invoices: 0, netto: 0, vat: 0, brutto: 0 });
+
+  $('vat-rows').innerHTML = rows.length
+    ? rows.map((m) => `
+        <tr>
+          <td class="mono strong">${esc(m.month)}</td>
+          <td class="num">${int(m.invoices)}</td>
+          <td class="num">${money(m.netto)}</td>
+          <td class="num strong">${money(m.vat)}</td>
+          <td class="num">${money(m.brutto)}</td>
+        </tr>`).join('') + `
+        <tr style="border-top:2px solid var(--ink)">
+          <td class="strong">TOTAL</td>
+          <td class="num strong">${int(t.invoices)}</td>
+          <td class="num strong">${money(t.netto)}</td>
+          <td class="num strong">${money(t.vat)}</td>
+          <td class="num strong">${money(t.brutto)}</td>
+        </tr>`
+    : '<tr><td colspan="5" class="empty">No dated invoices yet</td></tr>';
+}
+
+// ── jobs: sync + upload ───────────────────────────────────────────────────
+
+function showConsole(on) { $('console').classList.toggle('show', on); }
+
+async function pollJob() {
+  let s;
+  try {
+    s = await api('/api/job');
+  } catch { return; }
+
+  const dot = $('job-dot');
+  dot.className = 'dot ' + s.state;
+  $('job-title').textContent = {
+    idle: 'Idle', running: `Running ${s.kind}…`,
+    done: `Finished ${s.kind}`, failed: `${s.kind} failed`,
+  }[s.state] || s.state;
+
+  const lines = (s.log || []).map(esc);
+  if (s.error) lines.push(`<span class="err">error: ${esc(s.error)}</span>`);
+  const log = $('job-log');
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+  log.innerHTML = lines.join('\n') || 'No output yet.';
+  if (atBottom) log.scrollTop = log.scrollHeight;
+
+  $('job-cancel').disabled = s.state !== 'running';
+  const busy = s.state === 'running';
+  $('btn-sync').disabled = busy;
+  $('btn-upload').disabled = busy;
+  $('sync-label').textContent = busy ? 'Syncing…' : 'Sync mailbox';
+
+  if (busy) {
+    if (!state.jobTimer) state.jobTimer = setInterval(pollJob, 1000);
+  } else if (state.jobTimer) {
+    clearInterval(state.jobTimer);
+    state.jobTimer = null;
+    if (s.state === 'done') toast(s.result || 'Finished');
+    if (s.state === 'failed') toast(s.error || 'Job failed', true);
+    refreshAll();
+  }
+}
+
+$('btn-sync').addEventListener('click', async () => {
+  try {
+    await api('/api/fetch', { method: 'POST' });
+    showConsole(true);
+    pollJob();
+  } catch (e) { toast(e.message, true); }
+});
+
+$('job-cancel').addEventListener('click', () => api('/api/job/cancel', { method: 'POST' }).catch(() => {}));
+$('job-hide').addEventListener('click', () => showConsole(false));
+
+async function uploadFiles(files) {
+  if (!files || !files.length) return;
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  try {
+    await api('/api/upload', { method: 'POST', body: fd });
+    showConsole(true);
+    pollJob();
+  } catch (e) { toast(e.message, true); }
+}
+
+$('btn-upload').addEventListener('click', () => $('file-input').click());
+$('file-input').addEventListener('change', (e) => {
+  uploadFiles(e.target.files);
+  e.target.value = '';
+});
+
+const dz = $('dropzone');
+['dragenter', 'dragover'].forEach((ev) =>
+  dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('hot'); }));
+['dragleave', 'drop'].forEach((ev) =>
+  dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('hot'); }));
+dz.addEventListener('drop', (e) => uploadFiles(e.dataTransfer.files));
+dz.addEventListener('click', () => $('file-input').click());
+
+// Dropping anywhere else must not make the browser navigate to the file.
+['dragover', 'drop'].forEach((ev) =>
+  window.addEventListener(ev, (e) => { if (e.target !== dz) e.preventDefault(); }));
+
+// ── exports & session ─────────────────────────────────────────────────────
+
+// Exports follow the active filters, so a download matches what is on screen.
+// Wrapped in arrows on purpose. These two live in exports.js, which the page
+// loads after this file, so naming them directly here reads an identifier that
+// does not exist yet — a ReferenceError that kills the rest of this script.
+// The arrow defers the lookup to click time, by which point every script has run.
+$('btn-sheet').addEventListener('click', () => openGenerate());
+$('btn-files').addEventListener('click', () => openFiles());
+
+$('btn-logout').addEventListener('click', async () => {
+  try { await api('/api/logout', { method: 'POST' }); } catch {}
+  location.href = '/';
+});
+
+/** The headline the front page exists to answer: what has this month cost, and
+    is that more or less than the same point last month. The comparison uses the
+    same number of days into the previous month, because measuring a part-month
+    against a whole one always reads as a fall. */
+function renderThisMonth(m) {
+  if (!m) return;
+
+  let trend;
+  if (!m.has_prev) {
+    trend = { k: `vs ${m.prev_label}`, v: 'no data', s: 'nothing recorded in that period' };
+  } else {
+    const pct = m.change_pct;
+    const dir = Math.abs(pct) < 0.5 ? 'flat' : (pct > 0 ? 'up' : 'down');
+    const word = { up: 'higher', down: 'lower', flat: 'about level' }[dir];
+    trend = {
+      k: `vs ${m.prev_label}`,
+      html: `<span class="trend ${dir}">${dir === 'flat' ? 'level' : (pct > 0 ? '+' : '') + pct.toFixed(1) + '%'}</span>`,
+      s: `${word} than £${money(m.prev_brutto)} by day ${int(m.day_of_month)} of ${m.prev_label}`,
+    };
+  }
+
+  $('month-title').textContent = m.month;
+  $('month-tiles').innerHTML = [
+    { k: 'Spent this month', v: '£' + money(m.brutto), s: `including VAT · to day ${int(m.day_of_month)}` },
+    trend,
+    { k: 'Net', v: '£' + money(m.netto) },
+    { k: 'VAT', v: '£' + money(m.vat), s: 'reclaimable input VAT' },
+    { k: 'Repairs', v: int(m.invoices) },
+    { k: 'Average / repair', v: '£' + money(m.invoices ? m.brutto / m.invoices : 0) },
+  ].map((t) => `
+    <div class="tile">
+      <div class="k">${esc(t.k)}</div>
+      <div class="v">${t.html || esc(t.v)}</div>
+      ${t.s ? `<div class="m">${esc(t.s)}</div>` : ''}
+    </div>`).join('');
+}
+
+/** Badge counts are written by whichever view owns them, so a tab never opened
+    would sit on a stale zero. This fills in the ones no view has loaded yet. */
+async function refreshCounts() {
+  // loadRecentFiles lives in exports.js and also sets the badge, so this is a
+  // single request rather than two for the same data.
+  await loadRecentFiles();
+}
+
+// ── boot ──────────────────────────────────────────────────────────────────
+
+function refreshAll() {
+  loadFilters().catch(() => {});
+  loadRecentFiles().catch(() => {});
+  loadView(state.view);
+  if (state.view !== 'overview') loadOverview().catch(() => {});
+}
+
+Object.assign(viewLoaders, {
+  overview: loadOverview,
+  invoices: loadInvoices,
+  vehicles: loadVehicles,
+  parts: loadParts,
+  suppliers: loadSuppliers,
+  vat: loadVAT,
+});
+
+// Boot only once every script has run. Several of the functions used here are
+// defined in files the page loads after this one, so calling them at this
+// file's top level would read names that do not exist yet — the mistake that
+// silently killed the rest of this script once already. DOMContentLoaded fires
+// after all classic scripts in the document have executed, which is exactly
+// the guarantee needed.
+document.addEventListener('DOMContentLoaded', () => {
+  loadFilters().catch(() => {});
+  show('overview');
+  refreshCounts().catch(() => {});
+  pollJob();
+});

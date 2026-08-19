@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Goldstar — Invoices</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='black'/><text x='16' y='23' font-size='20' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>G</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="brand-mark">G</span> Goldstar</div>
+    <div class="spacer"></div>
+    <button class="btn solid" id="btn-sync">
+      <span id="sync-label">Sync mailbox</span>
+    </button>
+    <button class="btn" id="btn-upload">Upload</button>
+    <button class="btn" id="btn-sheet">Generate spreadsheet</button>
+    <button class="btn hide-sm" id="btn-files">Saved files<span class="count" id="c-exports">0</span></button>
+    <button class="btn" id="btn-logout" title="Sign out">Sign out</button>
+    <input type="file" id="file-input" multiple hidden
+           accept=".pdf,.png,.jpg,.jpeg,.webp,.heic">
+  </div>
+  <div class="searchbar">
+    <div class="omni-wrap">
+      <svg class="omni-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      <input type="search" id="omni" autocomplete="off"
+             placeholder="Search everything — registration, part number, supplier, invoice number…">
+      <button class="omni-clear" id="omni-clear" aria-label="Clear" hidden>✕</button>
+    </div>
+    <div class="omni-dates">
+      <label for="omni-from">From</label>
+      <input type="date" id="omni-from">
+      <label for="omni-to">To</label>
+      <input type="date" id="omni-to">
+      <button class="btn sm" id="omni-range-clear">Any date</button>
+    </div>
+    <div class="omni-results" id="omni-results" hidden></div>
+  </div>
+  <nav class="tabs" role="tablist" id="tabs"></nav>
+  <div class="subtabs" id="subtabs"></div>
+</header>
+
+<main>
+  <!-- Overview -->
+  <section class="view active" id="view-overview">
+    <div class="view-head">
+      <h2>Overview</h2>
+      <span class="sub" id="overview-sub"></span>
+    </div>
+    <div class="section-title" id="month-title" style="margin-top:0">This month</div>
+    <div class="tiles" id="month-tiles"></div>
+
+    <div class="section-title">Recent spreadsheets
+      <button class="btn sm" id="ov-generate" style="margin-left:10px">Generate</button>
+      <button class="btn sm" id="ov-all-files" style="margin-left:6px">See all</button>
+    </div>
+    <div class="panel" style="margin-bottom:26px"><div class="table-scroll">
+      <table>
+        <thead><tr><th>File</th><th>Covers</th><th class="num">Rows</th>
+          <th class="num">Size</th><th>Generated</th><th></th></tr></thead>
+        <tbody id="ov-files"></tbody>
+      </table>
+    </div></div>
+
+    <div class="section-title">All time</div>
+    <div class="tiles" id="tiles"></div>
+
+    <div class="view-head" style="margin-top:8px"><h2 style="font-size:16px">Gross spend by month</h2></div>
+    <div class="panel" style="padding:16px 18px">
+      <div id="bars"></div>
+    </div>
+
+    <div class="section-title">Top vehicles by spend</div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Registration</th><th class="num">Invoices</th><th class="num">Parts</th>
+        <th class="num">Net</th><th class="num">VAT</th><th class="num">Gross</th>
+      </tr></thead><tbody id="top-vehicles"></tbody></table>
+    </div></div>
+  </section>
+
+  <!-- Invoices -->
+  <section class="view" id="view-invoices">
+    <div class="view-head">
+      <h2>Invoices</h2>
+      <span class="sub" id="inv-sub"></span>
+    </div>
+
+    <div class="dropzone" id="dropzone">
+      <strong>Drop invoices here</strong>
+      PDF or photo — they go through the same extraction as mailbox invoices
+    </div>
+
+    <div class="filters">
+      <div class="search-wrap" style="grid-column:1/-1">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+        <input type="search" id="f-q" placeholder="Search registration, part number, supplier, invoice number…">
+      </div>
+      <div class="field"><label for="f-from">From</label><input type="date" id="f-from"></div>
+      <div class="field"><label for="f-to">To</label><input type="date" id="f-to"></div>
+      <div class="field"><label for="f-supplier">Supplier</label>
+        <select id="f-supplier"><option value="">All</option></select></div>
+      <div class="field"><label for="f-reg">Vehicle</label>
+        <select id="f-reg"><option value="">All</option></select></div>
+      <div class="field"><label for="f-review">Status</label>
+        <select id="f-review">
+          <option value="">All</option>
+          <option value="yes">Needs review</option>
+          <option value="no">Clean</option>
+        </select></div>
+      <div class="field"><label>&nbsp;</label>
+        <button class="btn" id="f-clear">Clear filters</button></div>
+    </div>
+
+    <div class="panel">
+      <div class="table-scroll">
+        <table>
+          <thead><tr>
+            <th class="sortable" data-sort="date">Date<span class="arrow">↓</span></th>
+            <th class="sortable" data-sort="supplier">Supplier<span class="arrow">↓</span></th>
+            <th>Invoice no.</th>
+            <th class="sortable" data-sort="reg">Vehicle<span class="arrow">↓</span></th>
+            <th>Parts</th>
+            <th class="num sortable" data-sort="netto">Net<span class="arrow">↓</span></th>
+            <th class="num sortable" data-sort="vat">VAT<span class="arrow">↓</span></th>
+            <th class="num sortable" data-sort="brutto">Gross<span class="arrow">↓</span></th>
+            <th></th>
+          </tr></thead>
+          <tbody id="inv-rows"></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <span class="info" id="inv-info"></span>
+        <span style="display:flex;gap:8px">
+          <button class="btn sm" id="page-prev">Previous</button>
+          <button class="btn sm" id="page-next">Next</button>
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Vehicles -->
+  <section class="view" id="view-vehicles">
+    <div class="view-head"><h2>Vehicles</h2>
+      <span class="sub">Spend per registration. Select one to see its invoices.</span></div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Registration</th><th class="num">Invoices</th><th class="num">Parts</th>
+        <th class="num">Net</th><th class="num">VAT</th><th class="num">Gross</th><th>Last invoice</th>
+      </tr></thead><tbody id="veh-rows"></tbody></table>
+    </div></div>
+  </section>
+
+  <!-- Parts -->
+  <section class="view" id="view-parts">
+    <div class="view-head"><h2>Parts</h2>
+      <span class="sub">Ranked by spend. A part recurring on one vehicle is worth a look.</span></div>
+    <div class="search-wrap" style="margin-bottom:14px;max-width:380px">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      <input type="search" id="parts-filter" placeholder="Filter parts…">
+    </div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Part number</th><th>Description</th><th class="num">Times</th>
+        <th class="num">Qty</th><th class="num">Net</th><th class="num">Vehicles</th><th>Last seen</th>
+      </tr></thead><tbody id="part-rows"></tbody></table>
+    </div></div>
+  </section>
+
+  <!-- Suppliers -->
+  <section class="view" id="view-suppliers">
+    <div class="view-head"><h2>Suppliers</h2>
+      <span class="sub">Select one to see its invoices.</span></div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Supplier</th><th class="num">Invoices</th>
+        <th class="num">Net</th><th class="num">VAT</th><th class="num">Gross</th><th>Last invoice</th>
+      </tr></thead><tbody id="sup-rows"></tbody></table>
+    </div></div>
+  </section>
+
+  <!-- VAT -->
+  <section class="view" id="view-vat">
+    <div class="view-head"><h2>VAT by month</h2>
+      <span class="sub">Reclaimable input VAT, grouped by calendar month.</span></div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Month</th><th class="num">Invoices</th>
+        <th class="num">Net</th><th class="num">VAT</th><th class="num">Gross</th>
+      </tr></thead><tbody id="vat-rows"></tbody></table>
+    </div></div>
+  </section>
+
+
+  <!-- Spending -->
+  <section class="view" id="view-spending">
+    <div class="view-head"><h2>Spending</h2>
+      <span class="sub" id="spend-sub"></span></div>
+
+    <div class="chips" id="spend-periods">
+      <button class="chip" data-period="7d">7 days</button>
+      <button class="chip" data-period="30d" aria-pressed="true">30 days</button>
+      <button class="chip" data-period="90d">90 days</button>
+      <button class="chip" data-period="365d">365 days</button>
+      <button class="chip" data-period="custom">Custom</button>
+    </div>
+
+    <div class="filters" style="margin-bottom:18px">
+      <div class="field"><label for="spend-from">From</label><input type="date" id="spend-from"></div>
+      <div class="field"><label for="spend-to">To</label><input type="date" id="spend-to"></div>
+      <div class="field"><label for="spend-reg">Registration</label>
+        <input type="text" id="spend-reg" placeholder="e.g. AY19KTX — leave blank for all"></div>
+      <div class="field"><label for="spend-scope">What for</label>
+        <select id="spend-scope">
+          <option value="">Everything</option>
+          <option value="vehicle">Vehicle work only</option>
+          <option value="general">General / workshop stock only</option>
+        </select></div>
+    </div>
+
+    <div class="tiles" id="spend-tiles"></div>
+
+    <div class="section-title">Daily spend</div>
+    <div class="panel" style="padding:16px 18px;margin-bottom:22px">
+      <div id="spend-bars"></div>
+    </div>
+
+    <div class="section-title">Day by day — what was bought, and for how much</div>
+    <div class="daylist" id="spend-days"></div>
+  </section>
+
+
+
+  <!-- Generate spreadsheet -->
+  <div class="modal-scrim" id="gen-scrim" hidden></div>
+  <div class="modal" id="gen-modal" role="dialog" aria-modal="true" aria-labelledby="gen-h" hidden>
+    <div class="modal-head">
+      <h3 id="gen-h">Generate spreadsheet</h3>
+      <button class="btn icon" id="gen-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-label">Format</div>
+      <div class="chips" id="gen-format">
+        <button class="chip" data-format="xlsx" aria-pressed="true">Excel (.xlsx)</button>
+        <button class="chip" data-format="csv">CSV (.csv)</button>
+      </div>
+      <div class="hint" id="gen-format-hint"></div>
+
+      <div class="field-label" style="margin-top:16px">Period</div>
+      <div class="chips" id="gen-period">
+        <button class="chip" data-window="24h">Last 24 hours</button>
+        <button class="chip" data-window="7d">Last 7 days</button>
+        <button class="chip" data-window="30d" aria-pressed="true">Last 30 days</button>
+        <button class="chip" data-window="90d">Last 90 days</button>
+        <button class="chip" data-window="all">Everything</button>
+        <button class="chip" data-window="custom">Custom</button>
+      </div>
+      <div class="grid2" id="gen-custom" hidden style="margin-top:12px">
+        <div class="field"><label for="gen-from">From</label><input type="date" id="gen-from"></div>
+        <div class="field"><label for="gen-to">To</label><input type="date" id="gen-to"></div>
+      </div>
+      <div id="gen-status" class="gen-status"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="gen-cancel">Cancel</button>
+      <button class="btn solid" id="gen-go">Generate</button>
+    </div>
+  </div>
+
+  <!-- Saved spreadsheets -->
+  <div class="modal-scrim" id="files-scrim" hidden></div>
+  <div class="modal wide" id="files-modal" role="dialog" aria-modal="true" aria-labelledby="files-h" hidden>
+    <div class="modal-head">
+      <h3 id="files-h">Saved spreadsheets</h3>
+      <span class="sub" id="files-sub"></span>
+      <button class="btn icon" id="files-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="panel"><div class="table-scroll"><table>
+        <thead><tr>
+          <th>File</th><th>Covers</th><th class="num">Rows</th>
+          <th class="num">Gross</th><th class="num">Size</th><th>Generated</th><th></th>
+        </tr></thead>
+        <tbody id="files-rows"></tbody>
+      </table></div></div>
+
+      <div id="files-preview" hidden style="margin-top:18px">
+        <div class="section-title">
+          Preview — <span id="prev-name" class="mono"></span>
+          <button class="btn sm" id="prev-close" style="margin-left:10px">Close preview</button>
+          <button class="btn sm solid" id="prev-download" style="margin-left:6px">Download</button>
+        </div>
+        <div class="tabs-inline" id="prev-tabs"></div>
+        <div class="panel"><div class="xl-wrap">
+          <table><thead id="prev-head"></thead><tbody id="prev-body"></tbody></table>
+        </div></div>
+        <div class="sub" id="prev-note" style="margin-top:8px"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="files-generate">Generate a new one…</button>
+      <button class="btn solid" id="files-done">Done</button>
+    </div>
+  </div>
+
+  <!-- Vehicle detail -->
+  <section class="view" id="view-vehicle">
+    <div class="view-head">
+      <button class="btn sm" id="veh-back">← Vehicles</button>
+      <h2 id="veh-title">Vehicle</h2>
+      <span class="sub" id="veh-sub"></span>
+      <div class="spacer"></div>
+      <button class="btn sm" id="veh-spending">Spending trend →</button>
+    </div>
+    <div class="tiles" id="veh-tiles"></div>
+    <div class="section-title">Spend by month</div>
+    <div class="panel" style="padding:16px 18px"><div id="veh-bars"></div></div>
+    <div class="grid2" style="align-items:start;margin-top:22px">
+      <div>
+        <div class="section-title">Suppliers</div>
+        <div class="panel"><div class="table-scroll"><table>
+          <thead><tr><th>Supplier</th><th class="num">Inv</th><th class="num">Gross</th></tr></thead>
+          <tbody id="veh-suppliers"></tbody></table></div></div>
+      </div>
+      <div>
+        <div class="section-title">Parts fitted</div>
+        <div class="panel"><div class="table-scroll"><table>
+          <thead><tr><th>Part</th><th class="num">Times</th><th class="num">Net</th></tr></thead>
+          <tbody id="veh-parts"></tbody></table></div></div>
+      </div>
+    </div>
+    <div class="section-title">Invoices</div>
+    <div class="panel"><div class="table-scroll"><table>
+      <thead><tr><th>Date</th><th>Supplier</th><th>Invoice no.</th>
+        <th class="num">Net</th><th class="num">VAT</th><th class="num">Gross</th></tr></thead>
+      <tbody id="veh-invoices"></tbody></table></div></div>
+  </section>
+
+  <!-- Part detail -->
+  <section class="view" id="view-part">
+    <div class="view-head">
+      <button class="btn sm" id="part-back">← Parts</button>
+      <h2 id="part-title">Part</h2>
+      <span class="sub" id="part-sub"></span>
+    </div>
+    <div class="tiles" id="part-tiles"></div>
+    <div class="section-title">Unit price history</div>
+    <div class="panel" style="padding:16px 18px"><div id="part-bars"></div></div>
+    <div class="section-title">Every purchase</div>
+    <div class="panel"><div class="table-scroll"><table>
+      <thead><tr><th>Date</th><th>Supplier</th><th>Vehicle</th>
+        <th class="num">Qty</th><th class="num">Unit price</th><th class="num">Net</th></tr></thead>
+      <tbody id="part-history"></tbody></table></div></div>
+  </section>
+
+  <!-- Fleet -->
+  <section class="view" id="view-fleet">
+    <div class="view-head"><h2>Fleet</h2>
+      <span class="sub">Assign each registration to the business that owns it.</span></div>
+
+    <div class="tiles" id="company-tiles"></div>
+
+    <div class="bar" style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">
+      <input type="text" id="new-company" placeholder="New company name" style="max-width:280px">
+      <button class="btn" id="add-company">Add company</button>
+    </div>
+
+    <div class="section-title">Unregistered plates seen on invoices</div>
+    <div class="panel"><div class="table-scroll"><table>
+      <thead><tr><th>Registration</th><th class="num">Invoices</th><th class="num">Gross</th>
+        <th>Last seen</th><th></th></tr></thead>
+      <tbody id="unassigned-rows"></tbody></table></div></div>
+
+    <div class="section-title">Registry</div>
+    <div class="panel"><div class="table-scroll"><table>
+      <thead><tr><th>Registration</th><th>Company</th><th>Make</th><th>Model</th>
+        <th>Driver</th><th class="num">Gross</th><th>Status</th><th></th></tr></thead>
+      <tbody id="registry-rows"></tbody></table></div></div>
+  </section>
+
+  <!-- Training -->
+  <section class="view" id="view-training">
+    <div class="view-head"><h2>Training</h2>
+      <span class="sub">Teach the extractor with real invoices and their correct values.</span></div>
+
+    <div class="panel" style="padding:16px 18px;margin-bottom:18px">
+      <div style="font-size:13px;line-height:1.7">
+        Drop reference invoices in this folder, or upload them below:
+        <div class="mono" id="examples-folder" style="margin-top:6px;font-size:12px"></div>
+      </div>
+    </div>
+
+    <div class="dropzone" id="example-drop">
+      <strong>Drop example invoices here</strong>
+      Then open each one and enter what it should have extracted
+    </div>
+
+    <div class="bar" style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">
+      <button class="btn" id="scan-examples">Rescan folder</button>
+      <button class="btn solid" id="run-eval">Run accuracy check</button>
+    </div>
+
+    <div class="section-title">Example invoices</div>
+    <div class="panel"><div class="table-scroll"><table>
+      <thead><tr><th>File</th><th>Supplier</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+      <tbody id="example-rows"></tbody></table></div></div>
+
+    <div class="section-title">Supplier hints</div>
+    <div class="panel" style="padding:16px 18px;margin-bottom:12px">
+      <div class="grid2" style="margin-bottom:12px">
+        <div class="field"><label for="hint-supplier">Supplier</label>
+          <input type="text" id="hint-supplier" placeholder="Exactly as it appears on the invoice"></div>
+        <div class="field"><label for="hint-text">Hint</label>
+          <input type="text" id="hint-text" placeholder="e.g. the reg is under 'Vehicle' top right"></div>
+      </div>
+      <button class="btn" id="add-hint">Save hint</button>
+    </div>
+    <div class="panel"><div class="table-scroll"><table>
+      <thead><tr><th>Supplier</th><th>Hint</th><th></th></tr></thead>
+      <tbody id="hint-rows"></tbody></table></div></div>
+
+    <div class="section-title">Accuracy history</div>
+    <div class="panel"><div class="table-scroll"><table>
+      <thead><tr><th>When</th><th>Model</th><th class="num">Examples</th>
+        <th class="num">Fields</th><th class="num">Accuracy</th></tr></thead>
+      <tbody id="eval-rows"></tbody></table></div></div>
+  </section>
+
+  <!-- Admin -->
+  <section class="view" id="view-admin">
+    <div class="view-head"><h2>Admin</h2>
+      <span class="sub">Configuration, connections and data management.</span></div>
+
+    <div class="tiles" id="admin-tiles"></div>
+
+    <div class="section-title">Connections</div>
+    <div class="panel" style="padding:16px 18px;margin-bottom:18px">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="btn" id="test-imap">Test mailbox</button>
+        <button class="btn" id="test-gemini">Test Gemini</button>
+      </div>
+      <div id="conn-result" style="font-size:13px"></div>
+    </div>
+
+    <div class="section-title">Configuration</div>
+    <div class="panel" style="margin-bottom:18px"><div class="table-scroll">
+      <table><tbody id="admin-config"></tbody></table></div></div>
+
+    <div class="section-title">Mailbox</div>
+    <div class="panel" style="padding:16px 18px;margin-bottom:18px">
+      <div class="grid2" style="margin-bottom:12px">
+        <div class="field"><label for="mb-user">Email address</label>
+          <input type="text" id="mb-user" placeholder="invoices@yourdomain.co.uk" autocomplete="username"></div>
+        <div class="field"><label for="mb-pass">Mailbox password</label>
+          <input type="password" id="mb-pass" placeholder="leave blank to keep the saved one" autocomplete="new-password"></div>
+        <div class="field"><label for="mb-host">IMAP host</label>
+          <input type="text" id="mb-host" value="imap.hostinger.com"></div>
+        <div class="field"><label for="mb-port">Port</label>
+          <input type="number" id="mb-port" value="993"></div>
+        <div class="field"><label for="mb-folder">Folder</label>
+          <input type="text" id="mb-folder" value="INBOX"></div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn solid" id="mb-save">Test and save</button>
+        <button class="btn" id="mb-save-only">Save without testing</button>
+      </div>
+      <div id="mb-result" style="font-size:13px;margin-top:12px"></div>
+      <div class="m" style="color:var(--g4);font-size:12px;margin-top:10px">
+        Stored at <span class="mono">~/.local/share/garage-goldstar/mailbox.env</span> (mode 600).
+        The IMAP password is kept in plain text because mailbox login needs the original
+        secret — it cannot be hashed like the dashboard password.
+      </div>
+    </div>
+
+    <div class="section-title">Change password</div>
+    <div class="panel" style="padding:16px 18px;margin-bottom:18px">
+      <div class="grid2" style="margin-bottom:12px">
+        <div class="field"><label for="pw-current">Current password</label>
+          <input type="password" id="pw-current" autocomplete="current-password"></div>
+        <div class="field"><label for="pw-new">New password (min 10 chars)</label>
+          <input type="password" id="pw-new" autocomplete="new-password"></div>
+      </div>
+      <button class="btn solid" id="change-pw">Change password</button>
+    </div>
+
+    <div class="section-title">Data</div>
+    <div class="panel" style="padding:16px 18px">
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn" id="backup-db">Download backup</button>
+        <button class="btn" id="vacuum-db">Compact database</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Invoice detail -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <h3 id="d-title">Invoice</h3>
+    <button class="btn icon" id="d-close" aria-label="Close">✕</button>
+  </div>
+  <div class="drawer-body" id="d-body"></div>
+  <div class="drawer-foot" id="drawer-foot-invoice">
+        <a class="btn" id="d-original" target="_blank" rel="noopener">Open original</a>
+    <button class="btn solid" id="d-save">Save changes</button>
+    <button class="btn" id="d-reviewed">Mark reviewed</button>
+    <button class="btn" id="d-doc">Open document</button>
+    <div class="spacer"></div>
+    <button class="btn danger" id="d-delete">Delete</button>
+  </div>
+  <div class="drawer-foot" id="drawer-foot-vehicle" style="display:none">
+    <button class="btn solid" id="v-save">Save vehicle</button>
+    <div class="spacer"></div>
+    <button class="btn danger" id="v-remove">Remove from registry</button>
+  </div>
+  <div class="drawer-foot" id="drawer-foot-example" style="display:none">
+    <button class="btn solid" id="e-save">Save correct values</button>
+    <button class="btn" id="e-prefill">Auto-fill with AI</button>
+    <button class="btn" id="e-doc">Open document</button>
+    <div class="spacer"></div>
+    <button class="btn danger" id="e-remove">Remove</button>
+  </div>
+</aside>
+
+<!-- Job console -->
+<div class="console" id="console">
+  <div class="console-head">
+    <span class="dot" id="job-dot"></span>
+    <span id="job-title">Idle</span>
+    <div class="spacer"></div>
+    <button class="btn sm" id="job-cancel">Cancel</button>
+    <button class="btn sm" id="job-hide">Hide</button>
+  </div>
+  <div class="console-log" id="job-log"></div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="/static/chart.js"></script>
+<script src="/static/app.js"></script>
+<script src="/static/omni.js"></script>
+<script src="/static/spending.js"></script>
+<script src="/static/exports.js"></script>
+<script src="/static/fleet.js"></script>
+<script src="/static/training.js"></script>
+<script src="/static/admin.js"></script>
+</body>
+</html>

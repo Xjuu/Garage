@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Goldstar — Sign in</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='black'/><text x='16' y='23' font-size='20' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>G</text></svg>">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="brand"><span class="brand-mark">G</span> Goldstar</div>
+    <p class="sub">Invoice records. Sign in to continue.</p>
+
+    <form id="form">
+      <div class="field">
+        <label for="user">Username or email</label>
+        <input type="text" id="user" name="username"
+               autocomplete="username" required autofocus
+               placeholder="username or email">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password"
+               autocomplete="current-password" required>
+      </div>
+      <button class="btn solid" type="submit" id="submit">Sign in</button>
+      <div class="login-err" id="err" role="alert"></div>
+    </form>
+  </div>
+</div>
+<script src="/static/login.js"></script>
+</body>
+</html>

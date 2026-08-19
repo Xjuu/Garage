@@ -1,0 +1,28 @@
+[Unit]
+Description=Garage Goldstar local invoice dashboard
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=__BINDIR__/goldstar serve
+# Settings and data live beside the binary; see WorkingDirectory below.
+WorkingDirectory=__BINDIR__
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=__BINDIR__
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+# The dashboard has no authentication, so keep it off the network.
+IPAddressAllow=localhost
+IPAddressDeny=any
+
+[Install]
+WantedBy=default.target
