@@ -29,7 +29,10 @@ async function loadVehicleDetail() {
   const d = await api('/api/vehicle/' + encodeURIComponent(reg));
   const v = d.vehicle;
 
-  $('veh-title').textContent = v.registration;
+  // The silhouette sits in the heading beside the plate, at a size where the
+  // body type actually reads.
+  $('veh-title').innerHTML =
+    `<span class="veh-hero">${carIcon(v.make, v.model, 'lg')}<span>${esc(v.registration)}</span></span>`;
   const bits = [v.make, v.model, v.year].filter(Boolean).join(' ');
   $('veh-sub').textContent = [bits, v.company_name, v.driver ? 'driver ' + v.driver : '']
     .filter(Boolean).join(' · ') || 'not in the registry yet';
@@ -174,7 +177,15 @@ async function loadFleet() {
   $('registry-rows').innerHTML = registry.length
     ? registry.map((v) => `
         <tr>
-          <td class="clickable-reg"><span class="reg">${esc(v.registration)}</span></td>
+          <td class="clickable-reg">
+            <span class="veh">
+              ${carIcon(v.make, v.model)}
+              <span class="veh-text">
+                <span class="veh-reg">${esc(v.registration)}</span>
+                ${v.notes ? `<span class="veh-sub">${esc(v.notes)}</span>` : ''}
+              </span>
+            </span>
+          </td>
           <td>
             <select class="company-pick" data-reg="${esc(v.registration)}">
               ${companies.map((c) => `<option value="${c.id}"${c.id === v.company_id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}

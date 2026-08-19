@@ -300,6 +300,11 @@ type VehicleAgg struct {
 	VAT        float64 `json:"vat"`
 	Brutto     float64 `json:"brutto"`
 	LastDate   string  `json:"last_date"`
+	// From the fleet registry, so a plate can be read as "Skoda Superb,
+	// callsign 603" rather than seven characters nobody recognises.
+	Make     string `json:"make"`
+	Model    string `json:"model"`
+	Callsign string `json:"callsign"`
 }
 
 // Vehicles totals spend per registration — for a taxi fleet this is the view
@@ -312,8 +317,10 @@ func (s *Store) Vehicles() ([]VehicleAgg, error) {
 		         WHERE it.invoice_id IN (SELECT id FROM invoices WHERE vehicle_reg = i.vehicle_reg)
 		           AND it.part_number <> ''),
 		       COALESCE(SUM(i.netto),0), COALESCE(SUM(i.vat_amount),0), COALESCE(SUM(i.brutto),0),
-		       MAX(i.invoice_date)
+		       MAX(i.invoice_date),
+		       COALESCE(MAX(v.make),''), COALESCE(MAX(v.model),''), COALESCE(MAX(v.notes),'')
 		FROM invoices i
+		LEFT JOIN vehicles v ON v.registration = i.vehicle_reg
 		WHERE i.vehicle_reg <> ''
 		GROUP BY i.vehicle_reg
 		ORDER BY SUM(i.brutto) DESC`)
@@ -326,10 +333,13 @@ func (s *Store) Vehicles() ([]VehicleAgg, error) {
 	for rows.Next() {
 		var v VehicleAgg
 		var last sql.NullString
-		if err := rows.Scan(&v.VehicleReg, &v.Invoices, &v.Parts, &v.Netto, &v.VAT, &v.Brutto, &last); err != nil {
+		var notes string
+		if err := rows.Scan(&v.VehicleReg, &v.Invoices, &v.Parts, &v.Netto, &v.VAT, &v.Brutto, &last,
+			&v.Make, &v.Model, &notes); err != nil {
 			return nil, err
 		}
 		v.LastDate = last.String
+		v.Callsign = callsignFrom(notes)
 		out = append(out, v)
 	}
 	return out, rows.Err()
@@ -522,4 +532,18 @@ func (s *Store) distinct(q string) ([]string, error) {
 		out = append(out, v)
 	}
 	return out, rows.Err()
+}
+
+// callsignFrom pulls the dispatch callsign back out of the notes field, which
+// is where the fleet import records it.
+func callsignFrom(notes string) string {
+	const prefix = "Callsign "
+	if !strings.HasPrefix(notes, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(notes, prefix)
+	if cut, _, found := strings.Cut(rest, " · "); found {
+		return cut
+	}
+	return rest
 }

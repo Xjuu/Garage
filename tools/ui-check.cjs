@@ -24,7 +24,7 @@ const vm = require('vm');
 const path = require('path');
 
 const ASSETS = path.join(__dirname, '..', 'internal', 'web', 'assets');
-const ORDER = ['chart.js', 'app.js', 'omni.js', 'spending.js',
+const ORDER = ['caricon.js', 'chart.js', 'app.js', 'omni.js', 'spending.js',
   'exports.js', 'fleet.js', 'training.js', 'admin.js'];
 
 const html = fs.readFileSync(path.join(ASSETS, 'index.html'), 'utf8');

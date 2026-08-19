@@ -220,7 +220,7 @@ async function loadOverview() {
   $('top-vehicles').innerHTML = vehicles.length
     ? vehicles.slice(0, 8).map((v) => `
         <tr class="clickable" data-reg="${esc(v.vehicle_reg)}">
-          <td><span class="reg">${esc(v.vehicle_reg)}</span></td>
+          <td>${vehicleCell(v.vehicle_reg, v.make, v.model, v.callsign)}</td>
           <td class="num">${int(v.invoices)}</td>
           <td class="num">${int(v.parts)}</td>
           <td class="num">${money(v.netto)}</td>
@@ -501,7 +501,7 @@ async function loadVehicles() {
   $('veh-rows').innerHTML = rows.length
     ? rows.map((v) => `
         <tr class="clickable" data-reg="${esc(v.vehicle_reg)}">
-          <td><span class="reg">${esc(v.vehicle_reg)}</span></td>
+          <td>${vehicleCell(v.vehicle_reg, v.make, v.model, v.callsign)}</td>
           <td class="num">${int(v.invoices)}</td>
           <td class="num">${int(v.parts)}</td>
           <td class="num">${money(v.netto)}</td>

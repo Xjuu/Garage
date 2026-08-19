@@ -827,3 +827,54 @@ td.strong { font-weight: 700; }
 
 .xl-wrap tbody tr:hover .xl-cell { background: var(--g05); }
 .xl-wrap tbody tr:hover .xl-rownum { background: var(--g2); }
+
+/* ── Vehicle silhouettes ─────────────────────────────────────────────────
+   Everything is drawn in currentColor, so the icon inherits the text colour
+   and inverts with the theme on its own — black on white, white on black,
+   with no second asset and no JavaScript watching the colour scheme. */
+
+.car {
+  width: 34px; height: 15px;
+  flex-shrink: 0;
+  color: inherit;
+  overflow: visible;
+}
+.car.lg { width: 58px; height: 26px; }
+
+.car-body { fill: currentColor; }
+
+/* The wheels are punched out in the page background rather than filled, so
+   the silhouette reads as a car at 34px instead of a solid blob. */
+.car-wheel { fill: currentColor; }
+.car-hub   { fill: var(--paper); }
+.car-sign  { fill: currentColor; }
+
+/* Slightly held back so a table of them does not shout over the figures. */
+.veh .car { opacity: .78; }
+tr:hover .veh .car, .veh:hover .car { opacity: 1; }
+
+.veh { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.veh-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+
+.veh-reg {
+  font-family: var(--mono); font-weight: 700; font-size: 13px;
+  letter-spacing: .02em; white-space: nowrap;
+}
+.veh-sub {
+  font-size: 11.5px; color: var(--g4);
+  display: flex; align-items: center; gap: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* The dispatch callsign, shown as a badge because it is the number the office
+   actually uses on the radio. */
+.callsign {
+  display: inline-block; padding: 0 5px; border-radius: 4px;
+  background: var(--g1); color: var(--g5);
+  font-family: var(--mono); font-size: 10.5px; font-weight: 700;
+  line-height: 15px; white-space: nowrap;
+}
+
+/* Detail-page header: the car sits beside the plate at a larger size. */
+.veh-hero { display: flex; align-items: center; gap: 14px; }
+.veh-hero .car { opacity: 1; }
