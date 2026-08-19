@@ -834,20 +834,20 @@ td.strong { font-weight: 700; }
    with no second asset and no JavaScript watching the colour scheme. */
 
 .car {
-  width: 34px; height: 15px;
+  width: 44px; height: 19px;
   flex-shrink: 0;
   color: inherit;
   overflow: visible;
 }
-.car.lg { width: 58px; height: 26px; }
+.car.lg { width: 78px; height: 33px; }
 
-.car-body { fill: currentColor; }
+.car-body, .car-tyre, .car-sign { fill: currentColor; }
 
-/* The wheels are punched out in the page background rather than filled, so
-   the silhouette reads as a car at 34px instead of a solid blob. */
-.car-wheel { fill: currentColor; }
-.car-hub   { fill: var(--paper); }
-.car-sign  { fill: currentColor; }
+/* Glass, wheel arches and hubs are punched out in the page colour rather than
+   drawn in a second ink. That is what lets one path set serve both themes: the
+   body takes the text colour, the cut-outs take the background, and inverting
+   the palette inverts the icon. */
+.car-glass, .car-hub, .car-arch { fill: var(--paper); }
 
 /* Slightly held back so a table of them does not shout over the figures. */
 .veh .car { opacity: .78; }
