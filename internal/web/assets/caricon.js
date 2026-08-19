@@ -104,7 +104,7 @@ function carIcon(make, model, extraClass = '') {
     // nothing at all on every page after.
     return `<img class="car art ${esc(extraClass)}"
                  src="/api/fleet-icon/${esc(style)}?v=${esc(customIcons[style])}"
-                 alt="${esc(label)}" width="288" height="288"
+                 alt="${esc(label)}" width="512" height="512"
                  loading="lazy" decoding="async">`;
   }
 

@@ -891,13 +891,15 @@ tr:hover .veh .car, .veh:hover .car { opacity: 1; }
    icon is in use. Sized in CSS with width and height also set on the element,
    so the row never reflows as images arrive. */
 .car.art {
-  width: 60px; height: 60px;
-  border-radius: 10px;
+  width: 120px; height: 120px;
   object-fit: contain;
-  background: var(--g05);
+  /* No tile behind them any more: the artwork carries its own transparency,
+     so it sits directly on whatever the row's background happens to be. */
+  background: none;
+  border-radius: 0;
   opacity: 1;
 }
-.car.art.lg { width: 128px; height: 128px; border-radius: 16px; }
+.car.art.lg { width: 256px; height: 256px; border-radius: 0; }
 .veh .car.art { opacity: 1; }
 
 /* The tile carries its own breathing room rather than the row being widened
