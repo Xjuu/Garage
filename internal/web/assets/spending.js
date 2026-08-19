@@ -12,6 +12,18 @@ function weekdayOf(iso) {
   return Number.isNaN(d.getTime()) ? '' : WEEKDAY[d.getDay()];
 }
 
+/** Format a Date as YYYY-MM-DD using its LOCAL parts.
+ *
+ *  toISOString() converts to UTC first, so east of Greenwich local midnight
+ *  falls on the previous UTC day: at UTC+2, `new Date('2026-08-19T00:00:00')`
+ *  serialises as "2026-08-18". That shifted every day on the chart back by one
+ *  and meant today's column was never generated at all. The server speaks in
+ *  plain calendar dates, so the client must too.
+ */
+function isoLocal(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 /** Fill in the days with no spend. The query returns only days that had
     activity, but a chart with gaps closed up would misrepresent the shape of
     a month — a quiet week has to look quiet. */
@@ -25,7 +37,7 @@ function fillDays(series, from, to) {
   // Guard against a pathological range producing an unbounded loop.
   let guard = 0;
   while (cursor <= end && guard++ < 800) {
-    const iso = cursor.toISOString().slice(0, 10);
+    const iso = isoLocal(cursor);
     out.push(byDate.get(iso) || { date: iso, invoices: 0, netto: 0, vat: 0, brutto: 0 });
     cursor.setDate(cursor.getDate() + 1);
   }

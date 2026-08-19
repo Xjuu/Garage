@@ -115,5 +115,30 @@ setTimeout(() => {
   console.log('  dialogs hidden    :',
     `generate=${store['gen-modal'].hidden} files=${store['files-modal'].hidden}`);
 
-  process.exit(errors.length ? 1 : 0);
+  // The spend chart builds its own day axis in the browser's timezone. Using
+  // toISOString() there shifted every day back by one east of Greenwich and
+  // dropped today's column entirely, so this pins the behaviour down. Run the
+  // whole check under TZ=Asia/Tokyo or TZ=Pacific/Auckland to stress it.
+  const dateProblems = [];
+  if (typeof ctx.fillDays === 'function') {
+    const days = ctx.fillDays(
+      [{ date: '2026-08-19', brutto: 83.16, invoices: 1 }],
+      '2026-07-21', '2026-08-19');
+
+    if (days.length !== 30) dateProblems.push(`axis has ${days.length} days, want 30`);
+    if (days[0]?.date !== '2026-07-21') dateProblems.push(`starts ${days[0]?.date}, want 2026-07-21`);
+    if (days[days.length - 1]?.date !== '2026-08-19') {
+      dateProblems.push(`ends ${days[days.length - 1]?.date}, want 2026-08-19 (today must be included)`);
+    }
+    const total = days.reduce((a, d) => a + d.brutto, 0);
+    if (Math.abs(total - 83.16) > 0.005) {
+      dateProblems.push(`plotted total £${total.toFixed(2)}, want £83.16 — a day was dropped`);
+    }
+  } else {
+    dateProblems.push('fillDays is not defined');
+  }
+  console.log(`  spend axis (TZ=${process.env.TZ || 'system'}):`,
+    dateProblems.length ? dateProblems : 'includes today, totals match');
+
+  process.exit(errors.length || dateProblems.length ? 1 : 0);
 }, 300);
