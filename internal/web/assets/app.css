@@ -556,6 +556,12 @@ td.strong { font-weight: 700; }
 }
 .omni-hit:hover, .omni-hit:focus { background: var(--g05); outline: none; }
 
+/* The result Enter opens. Same inset-accent idiom used for a flagged invoice
+   row elsewhere, just in ink rather than the destructive red — this is a
+   pointer, not a warning. */
+.omni-hit.top { background: var(--g05); box-shadow: inset 3px 0 0 var(--ink); }
+.omni-hit.top:hover, .omni-hit.top:focus { background: var(--g1); }
+
 .omni-hit .kind {
   flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px;
   background: var(--ink); color: var(--paper);

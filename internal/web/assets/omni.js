@@ -63,6 +63,10 @@ function renderOmni(res) {
       openHit(b.dataset.kind, b.dataset.ref);
       closeOmni();
     }));
+
+  // The first hit rendered is what Enter opens, so it is marked to show that
+  // rather than leaving the shortcut invisible.
+  omniResults.querySelector('.omni-hit')?.classList.add('top');
 }
 
 /** Send the date range along when jumping to the invoice list, so a search
@@ -106,11 +110,24 @@ omni.addEventListener('focus', () => { if (omniResults.innerHTML) omniResults.hi
 $('omni-from').addEventListener('change', runOmni);
 $('omni-to').addEventListener('change', runOmni);
 
-// Enter goes straight to the filtered invoice list — the fallback when none of
-// the suggested hits is quite what you wanted.
+// Enter opens the top result — the first hit rendered, which is also the one
+// marked with .top. Vehicles, parts and suppliers rank above invoices, so
+// typing a plate and pressing Enter goes straight to that vehicle rather than
+// to a filtered list containing it.
+//
+// Falling back to the filtered invoice list only when there is no hit to open
+// — a date-only search, or a query that matched nothing — keeps that jump as
+// a genuine fallback rather than the default action.
 omni.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeOmni(); omni.blur(); return; }
   if (e.key !== 'Enter') return;
+
+  const topHit = !omniResults.hidden && omniResults.querySelector('.omni-hit.top');
+  if (topHit) {
+    openHit(topHit.dataset.kind, topHit.dataset.ref);
+    closeOmni();
+    return;
+  }
 
   const { q, from, to } = omniQuery();
   state.filters = { q, from, to, supplier: '', reg: '', review: '' };
