@@ -38,6 +38,8 @@ Usage:
   goldstar ingest F  Extract invoices from local PDF or image files
   goldstar export    Write an Excel export from what is already stored
   goldstar backup    Snapshot the database into data/backups and prune old ones
+  goldstar fleet-import F  Load a vehicle export (Callsign,Make,Model,Registration)
+                     into the registry. Shows what it would do; add --apply to write.
   goldstar examples  Scan the examples folder for new reference invoices
   goldstar eval      Re-extract every completed example and score the accuracy
   goldstar serve     Serve the dashboard (default 127.0.0.1:8787)
@@ -117,6 +119,16 @@ func realMain(cmd string) error {
 		return err
 	case "export":
 		return runExport(cfg, db)
+	case "fleet-import":
+		if len(os.Args) < 3 {
+			return fmt.Errorf("usage: goldstar fleet-import <vehicles.csv> [--apply]")
+		}
+		apply := len(os.Args) > 3 && os.Args[3] == "--apply"
+		rep, err := pipeline.ImportFleetCSV(db, os.Args[2], apply, logf)
+		if rep != nil {
+			printFleetReport(rep)
+		}
+		return err
 	case "backup":
 		path, err := pipeline.RunBackup(cfg, db)
 		if err != nil {
@@ -300,4 +312,33 @@ func secretState(s string) string {
 		return "(unset)"
 	}
 	return fmt.Sprintf("set, %d chars", len(s))
+}
+
+// printFleetReport shows the effect of an import before or after it happens.
+// Problems are listed in full rather than summarised: a registration that did
+// not import is a car whose costs will go unattributed, and a count alone
+// gives the operator no way to find it.
+func printFleetReport(r *pipeline.FleetReport) {
+	mode := "DRY RUN — nothing written"
+	if r.Applied {
+		mode = "applied"
+	}
+	fmt.Printf("\n  %d row(s) read, %d distinct vehicle(s)  [%s]\n", r.Rows, r.Vehicles, mode)
+	fmt.Printf("  %d new, %d already in the registry\n", r.Created, r.Updated)
+
+	section := func(title string, lines []string) {
+		if len(lines) == 0 {
+			return
+		}
+		fmt.Printf("\n  %s (%d)\n", title, len(lines))
+		for _, l := range lines {
+			fmt.Printf("    %s\n", l)
+		}
+	}
+	section("Spelling normalised", r.Corrections)
+	section("Not imported", r.Rejected)
+	section("Same plate, several callsigns", r.Duplicates)
+	section("Worth checking", r.Odd)
+	section("Invoiced but missing from this export", r.Unlisted)
+	fmt.Println()
 }
