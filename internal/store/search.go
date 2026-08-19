@@ -203,12 +203,17 @@ func (s *Store) searchRegistry(q, like string) ([]Hit, error) {
 }
 
 func (s *Store) searchVehicles(q, like, dateClause string, dateArgs []any) ([]Hit, error) {
-	text, textArgs := textClause(q, like, "i.vehicle_reg", "v.make", "v.model", "v.driver")
+	// v.notes carries the dispatch callsign, which is the number the office
+	// actually uses. Leaving it out meant a callsign only found cars that had
+	// never been invoiced — the ones you are least likely to be looking for.
+	text, textArgs := textClause(q, like,
+		"i.vehicle_reg", "v.make", "v.model", "v.driver", "v.notes")
 
 	sqlText := `
 		SELECT i.vehicle_reg, COUNT(1), COALESCE(SUM(i.brutto),0),
 		       COALESCE(MAX(NULLIF(i.invoice_date,'')),''),
-		       COALESCE(MAX(v.make),''), COALESCE(MAX(v.model),''), COALESCE(MAX(c.name),'')
+		       COALESCE(MAX(v.make),''), COALESCE(MAX(v.model),''), COALESCE(MAX(c.name),''),
+		       COALESCE(MAX(v.notes),'')
 		FROM invoices i
 		LEFT JOIN vehicles v  ON v.registration = i.vehicle_reg
 		LEFT JOIN companies c ON c.id = v.company_id
@@ -227,13 +232,16 @@ func (s *Store) searchVehicles(q, like, dateClause string, dateArgs []any) ([]Hi
 
 	out := []Hit{}
 	for rows.Next() {
-		var reg, date, make_, model, company string
+		var reg, date, make_, model, company, notes string
 		var count int
 		var brutto float64
-		if err := rows.Scan(&reg, &count, &brutto, &date, &make_, &model, &company); err != nil {
+		if err := rows.Scan(&reg, &count, &brutto, &date, &make_, &model, &company, &notes); err != nil {
 			return nil, err
 		}
 		sub := strings.TrimSpace(make_ + " " + model)
+		if cs := callsignFrom(notes); cs != "" {
+			sub = strings.TrimSpace("callsign " + cs + " · " + sub)
+		}
 		if company != "" {
 			sub = strings.TrimSpace(sub + " · " + company)
 		}

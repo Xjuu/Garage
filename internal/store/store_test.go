@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -352,3 +353,80 @@ func TestConfusableSpellingsShareOneVehicle(t *testing.T) {
 		t.Errorf("gross = %v, want 204.24 — the spend was split", rows[0].Brutto)
 	}
 }
+
+// The callsign is the number the office uses on the radio, so it has to find
+// the car whether or not that car has ever been invoiced. It previously only
+// matched vehicles with no invoices — the least useful half.
+func TestSearchByCallsignFindsInvoicedVehicles(t *testing.T) {
+	db := open(t)
+
+	spent := "Callsign 150"
+	if err := db.SaveVehicle("FG21OXA", VehiclePatch{
+		Make: ptr("Skoda"), Model: ptr("Octavia"), Notes: &spent,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	add(t, db, Invoice{InvoiceNumber: "A", VehicleReg: "FG21OXA",
+		InvoiceDate: "2026-08-17", Brutto: 204.24})
+
+	idle := "Callsign 210"
+	if err := db.SaveVehicle("DK18CXR", VehiclePatch{
+		Make: ptr("SEAT"), Model: ptr("Alhambra"), Notes: &idle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range []struct{ query, wantReg string }{
+		{"150", "FG21OXA"}, // has invoices — this is the case that failed
+		{"210", "DK18CXR"}, // has none
+	} {
+		res, err := db.GlobalSearch(c.query, "", "")
+		if err != nil {
+			t.Fatalf("search %q: %v", c.query, err)
+		}
+		found := false
+		for _, v := range res.Vehicles {
+			if v.Ref == c.wantReg {
+				found = true
+				if !strings.Contains(v.Subtitle, "callsign") {
+					t.Errorf("search %q: subtitle %q does not explain the match", c.query, v.Subtitle)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("search %q did not find %s", c.query, c.wantReg)
+		}
+	}
+}
+
+// A vehicle listed twice in a dispatch export keeps both callsigns, and either
+// one must find it.
+func TestSearchFindsEitherOfTwoCallsigns(t *testing.T) {
+	db := open(t)
+	both := "Callsign 603, 622"
+	if err := db.SaveVehicle("AE18FJZ", VehiclePatch{
+		Make: ptr("Skoda"), Model: ptr("Superb"), Notes: &both,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	add(t, db, Invoice{InvoiceNumber: "A", VehicleReg: "AE18FJZ",
+		InvoiceDate: "2026-08-19", Brutto: 178.09})
+
+	for _, q := range []string{"603", "622"} {
+		res, err := db.GlobalSearch(q, "", "")
+		if err != nil {
+			t.Fatalf("search %q: %v", q, err)
+		}
+		hit := false
+		for _, v := range res.Vehicles {
+			if v.Ref == "AE18FJZ" {
+				hit = true
+			}
+		}
+		if !hit {
+			t.Errorf("callsign %q did not find AE18FJZ", q)
+		}
+	}
+}
+
+func ptr(s string) *string { return &s }
