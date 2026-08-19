@@ -25,6 +25,7 @@ func (s *Server) routesAdmin(api *http.ServeMux) {
 	api.HandleFunc("GET /api/admin/models", s.json(s.adminModels))
 	api.HandleFunc("POST /api/admin/password", s.json(s.changePassword))
 	api.HandleFunc("POST /api/admin/mailbox", s.json(s.saveMailbox))
+	api.HandleFunc("POST /api/admin/backup-now", s.json(s.backupNow))
 	api.HandleFunc("POST /api/admin/vacuum", s.json(s.vacuum))
 	api.HandleFunc("GET /api/admin/backup", s.backup)
 }
@@ -46,6 +47,8 @@ func (s *Server) adminStatus(r *http.Request) (any, error) {
 	hints, _ := s.db.Hints()
 
 	return map[string]any{
+		"backups":        backupStatus(s.cfg),
+		"schedule":       s.sched.Status(),
 		"data_dir":       s.cfg.DataDir,
 		"database":       s.cfg.DBPath(),
 		"exports_dir":    s.cfg.ExportsDir(),
@@ -235,6 +238,27 @@ func (s *Server) applyMail(from *config.Config) {
 	s.cfg.IMAPUser = from.IMAPUser
 	s.cfg.IMAPPass = from.IMAPPass
 	s.cfg.IMAPMailbox = from.IMAPMailbox
+}
+
+// backupNow takes a snapshot on demand, using the same code path as the
+// nightly one so what you test by hand is what runs unattended.
+func (s *Server) backupNow(r *http.Request) (any, error) {
+	if s.cfg.BackupKeep <= 0 {
+		return nil, fail(http.StatusBadRequest,
+			"automatic backups are switched off (GOLDSTAR_BACKUP_KEEP=0)")
+	}
+	path, err := runBackup(s.cfg, s.db)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"ok": true, "name": filepath.Base(path), "bytes": info.Size(),
+		"status": backupStatus(s.cfg),
+	}, nil
 }
 
 func (s *Server) vacuum(r *http.Request) (any, error) {

@@ -3,10 +3,13 @@
 package mailbox
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,15 +43,54 @@ type Options struct {
 
 type Client struct {
 	c       *imapclient.Client
+	conn    net.Conn
 	mailbox string
 }
 
+// extend pushes the I/O deadline out again. Called as each message is
+// processed so a long but healthy sync is not cut off mid-download, while a
+// stalled one still dies rather than hanging forever.
+func (m *Client) extend() {
+	if m.conn != nil {
+		m.conn.SetDeadline(time.Now().Add(ioTimeout))
+	}
+}
+
+// dialTimeout bounds how long we wait to establish the TLS connection, and
+// ioTimeout bounds each subsequent read or write.
+//
+// Without these a mailbox that accepts the TCP connection but never completes
+// the handshake — a wedged server, a silently dropping firewall — hangs the
+// sync forever. Only one job runs at a time, so a single hung sync would block
+// every later one and invoices would stop arriving with nothing in the log to
+// say why.
+const (
+	dialTimeout = 30 * time.Second
+	ioTimeout   = 5 * time.Minute
+)
+
 func Connect(o Options) (*Client, error) {
-	addr := fmt.Sprintf("%s:%d", o.Host, o.Port)
-	c, err := imapclient.DialTLS(addr, nil)
+	// JoinHostPort rather than Sprintf: an IPv6 literal needs brackets.
+	addr := net.JoinHostPort(o.Host, strconv.Itoa(o.Port))
+
+	conn, err := (&net.Dialer{Timeout: dialTimeout}).Dial("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("connect %s: %w", addr, err)
 	}
+	// A deadline on the raw connection covers the TLS handshake and the login
+	// exchange, which is where a stalled server actually hangs.
+	if err := conn.SetDeadline(time.Now().Add(dialTimeout)); err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	tlsConn := tls.Client(conn, &tls.Config{ServerName: o.Host})
+	if err := tlsConn.Handshake(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("tls handshake with %s: %w", addr, err)
+	}
+
+	c := imapclient.New(tlsConn, nil)
 	if err := c.Login(o.User, o.Pass).Wait(); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("login as %s: %w", o.User, err)
@@ -57,7 +99,14 @@ func Connect(o Options) (*Client, error) {
 		c.Close()
 		return nil, fmt.Errorf("select mailbox %q: %w", o.Mailbox, err)
 	}
-	return &Client{c: c, mailbox: o.Mailbox}, nil
+
+	// Downloading attachments takes longer than logging in, so the deadline is
+	// relaxed once connected — but never removed.
+	if err := conn.SetDeadline(time.Now().Add(ioTimeout)); err != nil {
+		c.Close()
+		return nil, err
+	}
+	return &Client{c: c, conn: conn, mailbox: o.Mailbox}, nil
 }
 
 func (m *Client) Close() error {
@@ -85,6 +134,9 @@ func (m *Client) SearchRecent(lookbackDays int) ([]int64, error) {
 // FetchMessage downloads one message and returns it with any attachment that
 // looks like an invoice document.
 func (m *Client) FetchMessage(uid int64) (*Message, error) {
+	// Each message gets a fresh window, so a long mailbox is fine while a
+	// stalled transfer still trips the deadline.
+	m.extend()
 	set := imap.UIDSetNum(imap.UID(uid))
 	opts := &imap.FetchOptions{
 		UID:         true,

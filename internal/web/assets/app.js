@@ -186,12 +186,18 @@ async function loadOverview() {
 
   const tiles = [
     { k: 'Invoices', v: int(o.invoices) },
-    { k: 'Net spend', v: '£' + money(o.netto) },
+    { k: 'Purchases', v: '£' + money(o.purchases), m: 'including VAT' },
     { k: 'VAT', v: '£' + money(o.vat), m: 'reclaimable input VAT' },
-    { k: 'Gross spend', v: '£' + money(o.brutto) },
     { k: 'Vehicles', v: int(o.vehicles) },
     { k: 'Line items', v: int(o.items) },
   ];
+  if (o.credit_count > 0) {
+    tiles.push({
+      k: 'Credit notes', v: '−£' + money(Math.abs(o.credits)),
+      m: `${int(o.credit_count)} note(s)`,
+    });
+    tiles.push({ k: 'Net of credits', v: '£' + money(o.brutto), m: 'purchases less credits' });
+  }
   if (o.needs_review > 0) {
     tiles.push({ k: 'Needs review', v: int(o.needs_review), m: 'figures did not reconcile', alert: true });
   }
@@ -705,14 +711,26 @@ function renderThisMonth(m) {
   }
 
   $('month-title').textContent = m.month;
-  $('month-tiles').innerHTML = [
-    { k: 'Spent this month', v: '£' + money(m.brutto), s: `including VAT · to day ${int(m.day_of_month)}` },
+  // Credit notes are shown as their own tile rather than netted away. One big
+  // credit can otherwise turn a month of real purchasing into a negative
+  // "spend" figure that reads as an error.
+  const monthTiles = [
+    { k: 'Bought this month', v: '£' + money(m.purchases), s: `including VAT · to day ${int(m.day_of_month)}` },
     trend,
-    { k: 'Net', v: '£' + money(m.netto) },
     { k: 'VAT', v: '£' + money(m.vat), s: 'reclaimable input VAT' },
-    { k: 'Repairs', v: int(m.invoices) },
-    { k: 'Average / repair', v: '£' + money(m.invoices ? m.brutto / m.invoices : 0) },
-  ].map((t) => `
+    { k: 'Repairs', v: int(m.invoices - m.credit_count) },
+    {
+      k: 'Average / repair',
+      v: '£' + money((m.invoices - m.credit_count) ? m.purchases / (m.invoices - m.credit_count) : 0),
+    },
+  ];
+  if (m.credit_count > 0) {
+    monthTiles.push({
+      k: 'Credit notes', v: '−£' + money(Math.abs(m.credits)),
+      s: `${int(m.credit_count)} note(s) · net £${money(m.brutto)} after credits`,
+    });
+  }
+  $('month-tiles').innerHTML = monthTiles.map((t) => `
     <div class="tile">
       <div class="k">${esc(t.k)}</div>
       <div class="v">${t.html || esc(t.v)}</div>

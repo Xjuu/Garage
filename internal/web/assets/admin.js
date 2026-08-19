@@ -52,7 +52,41 @@ async function loadAdmin() {
     ? 'a password is saved — leave blank to keep it'
     : 'mailbox password';
 
+  renderBackups(a.backups, a.schedule);
+
   $('model-pick')?.addEventListener('focus', loadModelOptions, { once: true });
+}
+
+/** Backups and the nightly timer, together: they are the two things that fail
+    quietly, and a failure is only useful if it is visible. */
+function renderBackups(b, sched) {
+  b = b || {}; sched = sched || {};
+
+  $('backup-info').innerHTML = b.enabled
+    ? `Keeping the newest ${int(b.keep)} snapshots in <span class="mono">${esc(b.folder)}</span>.
+       ${b.count ? `${int(b.count)} stored (${humanBytes(b.bytes)}), latest
+         <span class="mono">${esc(b.latest || '')}</span> at ${esc(whenLocal(b.latest_at))}.`
+        : 'None taken yet — the first runs with tonight\'s sync.'}`
+    : '<span class="pill flag">Off</span> Automatic backups are disabled (GOLDSTAR_BACKUP_KEEP=0).';
+
+  // A run that failed is shown as a banner, not a log line, because the whole
+  // problem with a broken nightly sync is that nobody goes looking for it.
+  const alert = $('sync-alert');
+  if (sched.alert) {
+    alert.hidden = false;
+    alert.className = 'note flag';
+    alert.innerHTML =
+      `<strong>The automatic sync is failing.</strong>
+       ${int(sched.failures)} run(s) in a row have failed.
+       ${sched.last_error ? `Last error: ${esc(sched.last_error)}.` : ''}
+       ${sched.last_success
+         ? `Last successful sync: ${esc(sched.last_success)} (${int(sched.days_since_success)} day(s) ago).`
+         : 'There has been no successful automatic sync yet.'}
+       New invoices are not being collected until this is fixed.`;
+  } else {
+    alert.hidden = true;
+    alert.innerHTML = '';
+  }
 }
 
 function ok(text) { return `<span class="pill">${esc(text)}</span>`; }
@@ -162,6 +196,21 @@ $('mb-save').addEventListener('click', () => saveMailbox(true));
 $('mb-save-only').addEventListener('click', () => saveMailbox(false));
 
 $('backup-db').addEventListener('click', () => { location.href = '/api/admin/backup'; });
+
+$('backup-now').addEventListener('click', async () => {
+  const b = $('backup-now');
+  b.disabled = true; b.textContent = 'Backing up…';
+  try {
+    const r = await api('/api/admin/backup-now', { method: 'POST' });
+    $('backup-result').innerHTML =
+      `<span class="pill">Saved</span> <span style="margin-left:8px">${esc(r.name)} — ${humanBytes(r.bytes)}</span>`;
+    loadAdmin();
+  } catch (e) {
+    $('backup-result').innerHTML =
+      `<span class="pill flag">Failed</span> <span style="margin-left:8px">${esc(e.message)}</span>`;
+  }
+  b.disabled = false; b.textContent = 'Back up now';
+});
 
 $('vacuum-db').addEventListener('click', async () => {
   const b = $('vacuum-db');

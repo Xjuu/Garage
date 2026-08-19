@@ -269,16 +269,19 @@ func (s *Store) dailyDetail(from, to, scope string, scopeArgs []any) ([]DayDetai
 // previous month would always look like a fall, which is the kind of chart
 // that trains people to ignore it.
 type MonthToDate struct {
-	Month      string  `json:"month"`
-	Netto      float64 `json:"netto"`
-	VAT        float64 `json:"vat"`
-	Brutto     float64 `json:"brutto"`
-	Invoices   int     `json:"invoices"`
-	PrevBrutto float64 `json:"prev_brutto"`
-	PrevLabel  string  `json:"prev_label"`
-	HasPrev    bool    `json:"has_prev"`
-	ChangePct  float64 `json:"change_pct"`
-	DayOfMonth int     `json:"day_of_month"`
+	Month       string  `json:"month"`
+	Netto       float64 `json:"netto"`
+	VAT         float64 `json:"vat"`
+	Brutto      float64 `json:"brutto"`
+	Invoices    int     `json:"invoices"`
+	Purchases   float64 `json:"purchases"`
+	Credits     float64 `json:"credits"`
+	CreditCount int     `json:"credit_count"`
+	PrevBrutto  float64 `json:"prev_brutto"`
+	PrevLabel   string  `json:"prev_label"`
+	HasPrev     bool    `json:"has_prev"`
+	ChangePct   float64 `json:"change_pct"`
+	DayOfMonth  int     `json:"day_of_month"`
 }
 
 func (s *Store) ThisMonth(now time.Time) (*MonthToDate, error) {
@@ -287,10 +290,14 @@ func (s *Store) ThisMonth(now time.Time) (*MonthToDate, error) {
 
 	out := &MonthToDate{Month: start.Format("January 2006"), DayOfMonth: day}
 	err := s.db.QueryRow(`
-		SELECT COUNT(1), COALESCE(SUM(netto),0), COALESCE(SUM(vat_amount),0), COALESCE(SUM(brutto),0)
+		SELECT COUNT(1), COALESCE(SUM(netto),0), COALESCE(SUM(vat_amount),0), COALESCE(SUM(brutto),0),
+		       COALESCE(SUM(CASE WHEN brutto >= 0 THEN brutto ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN brutto <  0 THEN brutto ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN brutto <  0 THEN 1 ELSE 0 END),0)
 		FROM invoices WHERE invoice_date >= ? AND invoice_date <= ?`,
 		iso(start), iso(now)).
-		Scan(&out.Invoices, &out.Netto, &out.VAT, &out.Brutto)
+		Scan(&out.Invoices, &out.Netto, &out.VAT, &out.Brutto,
+			&out.Purchases, &out.Credits, &out.CreditCount)
 	if err != nil {
 		return nil, err
 	}

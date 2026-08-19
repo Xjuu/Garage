@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,10 +28,14 @@ type scheduler struct {
 	hour int
 	min  int
 
-	mu         sync.Mutex
-	next       time.Time
-	last       time.Time
-	lastResult string
+	mu                  sync.Mutex
+	next                time.Time
+	last                time.Time
+	lastResult          string
+	lastOK              bool
+	lastError           string
+	lastSuccess         time.Time
+	consecutiveFailures int
 }
 
 func newScheduler(cfg *config.Config, srv *Server) (*scheduler, error) {
@@ -97,7 +102,19 @@ func (s *scheduler) Status() map[string]any {
 	if !s.last.IsZero() {
 		out["last"] = s.last.In(s.loc).Format("Mon 2 Jan 15:04 MST")
 		out["last_result"] = s.lastResult
+		out["last_ok"] = s.lastOK
+		out["failures"] = s.consecutiveFailures
+		if s.lastError != "" {
+			out["last_error"] = s.lastError
+		}
 	}
+	if !s.lastSuccess.IsZero() {
+		out["last_success"] = s.lastSuccess.In(s.loc).Format("Mon 2 Jan 15:04 MST")
+		out["days_since_success"] = int(time.Since(s.lastSuccess).Hours() / 24)
+	}
+	// Surfaced so the dashboard can show a banner rather than leaving a silent
+	// failure buried in a log nobody reads.
+	out["alert"] = s.consecutiveFailures > 0
 	return out
 }
 
@@ -133,7 +150,7 @@ func (s *scheduler) fire() {
 	s.mu.Unlock()
 
 	if err := s.cfg.RequireMail(); err != nil {
-		s.record("skipped: " + err.Error())
+		s.recordFailure("mailbox not configured: " + err.Error())
 		log.Printf("scheduled sync skipped: %v", err)
 		return
 	}
@@ -142,26 +159,61 @@ func (s *scheduler) fire() {
 		logf := pipeline.LogFunc(func(format string, args ...any) {
 			logLine(fmt.Sprintf(format, args...))
 		})
-		st, err := pipeline.Fetch(ctx, s.cfg, s.srv.db, logf)
-		if st == nil {
-			return "", err
+
+		// Snapshot before ingesting, not after: if a bad run corrupts or
+		// pollutes the data, the backup you want is the one taken beforehand.
+		if path, bErr := runBackup(s.cfg, s.srv.db); bErr != nil {
+			logLine("backup failed: " + bErr.Error())
+			s.recordFailure("backup failed: " + bErr.Error())
+		} else if path != "" {
+			logLine("backed up to " + filepath.Base(path))
 		}
+
+		st, err := pipeline.Fetch(ctx, s.cfg, s.srv.db, logf)
+		if err != nil {
+			s.recordFailure(err.Error())
+			if st == nil {
+				return "", err
+			}
+			logLine(st.Summary())
+			return st.Summary(), err
+		}
+		s.recordSuccess(st.Summary())
 		logLine(st.Summary())
-		return st.Summary(), err
+		return st.Summary(), nil
 	})
 	if err != nil {
 		// A manual sync already running is not a failure; the mail it is
 		// fetching is the same mail this run would have fetched.
-		s.record("skipped: " + err.Error())
+		s.mu.Lock()
+		s.lastResult = "skipped: " + err.Error()
+		s.mu.Unlock()
 		log.Printf("scheduled sync skipped: %v", err)
 		return
 	}
-	s.record("started")
 	log.Print("scheduled mailbox sync started")
 }
 
-func (s *scheduler) record(result string) {
+func (s *scheduler) recordSuccess(result string) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.lastResult = result
-	s.mu.Unlock()
+	s.lastOK = true
+	s.lastError = ""
+	s.consecutiveFailures = 0
+	s.lastSuccess = time.Now()
+}
+
+// recordFailure keeps the reason and counts how many runs in a row have
+// failed. A single failure is usually a blip; several in a row means invoices
+// have quietly stopped arriving, which is the thing nobody notices until a VAT
+// quarter is due.
+func (s *scheduler) recordFailure(reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastResult = "failed: " + reason
+	s.lastOK = false
+	s.lastError = reason
+	s.consecutiveFailures++
+	log.Printf("ALERT: scheduled sync failed (%d in a row): %s", s.consecutiveFailures, reason)
 }

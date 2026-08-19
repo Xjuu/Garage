@@ -37,6 +37,10 @@ type Config struct {
 	SyncAt string
 	SyncTZ string
 
+	// BackupKeep is how many nightly database snapshots to retain. Zero
+	// disables automatic backups.
+	BackupKeep int
+
 	// PasswordHash gates the dashboard. Generate it with `goldstar passwd`.
 	PasswordHash string
 	// CookieSecure marks session cookies Secure. Required behind a Cloudflare
@@ -75,6 +79,7 @@ func Load() (*Config, error) {
 		Email:           envStr("GOLDSTAR_EMAIL", ""),
 		SyncAt:          envStr("GOLDSTAR_SYNC_AT", "18:30"),
 		SyncTZ:          envStr("GOLDSTAR_SYNC_TZ", "Europe/London"),
+		BackupKeep:      envInt("GOLDSTAR_BACKUP_KEEP", 14),
 		DataDir:         envStr("DATA_DIR", defaultDataDir(home)),
 		WebAddr:         envStr("WEB_ADDR", "127.0.0.1:8787"),
 		LookbackDays:    envInt("LOOKBACK_DAYS", 7),
@@ -83,24 +88,27 @@ func Load() (*Config, error) {
 		AllowNoPassword: envBool("GOLDSTAR_ALLOW_NO_PASSWORD", false),
 	}
 
-	// Mailbox settings saved from the admin page override .env for the same
-	// reason the password hash does.
+	// Mailbox settings saved from the admin page override the .env file, since
+	// they are the more recent deliberate choice. They do NOT override a
+	// variable set in the actual environment: that is the most explicit signal
+	// available, and an operator overriding one for a test or a systemd unit
+	// must not be silently ignored.
 	if kv, err := readKeyValues(c.MailFilePath()); err == nil {
-		if v := kv["IMAP_HOST"]; v != "" {
+		if v := kv["IMAP_HOST"]; v != "" && !envSet("IMAP_HOST") {
 			c.IMAPHost = v
 		}
-		if v := kv["IMAP_PORT"]; v != "" {
+		if v := kv["IMAP_PORT"]; v != "" && !envSet("IMAP_PORT") {
 			if n, err := strconv.Atoi(v); err == nil {
 				c.IMAPPort = n
 			}
 		}
-		if v := kv["IMAP_USER"]; v != "" {
+		if v := kv["IMAP_USER"]; v != "" && !envSet("IMAP_USER") {
 			c.IMAPUser = v
 		}
-		if v := kv["IMAP_PASS"]; v != "" {
+		if v := kv["IMAP_PASS"]; v != "" && !envSet("IMAP_PASS") {
 			c.IMAPPass = v
 		}
-		if v := kv["IMAP_MAILBOX"]; v != "" {
+		if v := kv["IMAP_MAILBOX"]; v != "" && !envSet("IMAP_MAILBOX") {
 			c.IMAPMailbox = v
 		}
 	}
@@ -182,7 +190,10 @@ func (c *Config) RequireGemini() error {
 
 func (c *Config) DBPath() string         { return filepath.Join(c.DataDir, "goldstar.db") }
 func (c *Config) AttachmentsDir() string { return filepath.Join(c.DataDir, "attachments") }
-func (c *Config) ExportsDir() string     { return filepath.Join(c.DataDir, "exports") }
+
+// BackupsDir holds automatic nightly snapshots of the database.
+func (c *Config) BackupsDir() string { return filepath.Join(c.DataDir, "backups") }
+func (c *Config) ExportsDir() string { return filepath.Join(c.DataDir, "exports") }
 
 // ExamplesDir is the drop folder for reference invoices used to teach the
 // extractor. Files placed here are picked up by `goldstar examples scan` and
@@ -190,7 +201,7 @@ func (c *Config) ExportsDir() string     { return filepath.Join(c.DataDir, "expo
 func (c *Config) ExamplesDir() string { return filepath.Join(c.DataDir, "examples") }
 
 func (c *Config) EnsureDirs() error {
-	for _, d := range []string{c.DataDir, c.AttachmentsDir(), c.ExportsDir(), c.ExamplesDir()} {
+	for _, d := range []string{c.DataDir, c.AttachmentsDir(), c.ExportsDir(), c.ExamplesDir(), c.BackupsDir()} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
 		}
@@ -200,6 +211,18 @@ func (c *Config) EnsureDirs() error {
 
 // readKeyValues parses a KEY=VALUE file without touching the process
 // environment, unlike loadEnvFile.
+// envSet reports whether a variable came from the real environment rather than
+// from a .env file. loadEnvFile records what it set so the two can be told
+// apart, which is the whole basis of the precedence rule above.
+func envSet(key string) bool {
+	_, fromFile := envFromFile[key]
+	_, present := os.LookupEnv(key)
+	return present && !fromFile
+}
+
+// envFromFile records keys that loadEnvFile put into the environment.
+var envFromFile = map[string]bool{}
+
 func readKeyValues(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -299,6 +322,9 @@ func loadEnvFile(path string) error {
 		}
 		if _, exists := os.LookupEnv(key); !exists {
 			os.Setenv(key, val)
+			// Remembered so a value that came from a file is not mistaken for
+			// one the operator set in the real environment.
+			envFromFile[key] = true
 		}
 	}
 	return sc.Err()
