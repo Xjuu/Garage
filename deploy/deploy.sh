@@ -35,8 +35,13 @@ CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" \
 echo "==> Preparing the server"
 ssh "$TARGET" "
   set -e
-  id -u '$SERVICE_USER' >/dev/null 2>&1 || \
-    adduser --system --group --home '$REMOTE_DIR' '$SERVICE_USER'
+  # useradd exists on every distribution; adduser is Debian-family only and is
+  # absent from many minimal server images, which is where this used to fail.
+  if ! id -u '$SERVICE_USER' >/dev/null 2>&1; then
+    useradd --system --user-group --home-dir '$REMOTE_DIR' --shell /usr/sbin/nologin '$SERVICE_USER' 2>/dev/null ||
+    useradd --system --user-group --home-dir '$REMOTE_DIR' --shell /bin/false '$SERVICE_USER'
+  fi
+  id '$SERVICE_USER'
   mkdir -p '$REMOTE_DIR'
 "
 
@@ -122,8 +127,9 @@ line or an scp:
   ssh $TARGET
   cd $REMOTE_DIR
 
-  # 1. dashboard password — prompts twice, never echoes, stores only a hash
-  sudo -u $SERVICE_USER ./goldstar passwd | grep GOLDSTAR_PASSWORD_HASH >> .env
+  # 1. dashboard password — prompts twice, never echoes, only a hash is stored.
+  #    No sudo needed: this command writes nothing, it just prints.
+  ./goldstar passwd | grep GOLDSTAR_PASSWORD_HASH >> .env
 
   # 2. Gemini key — read -rs keeps the value out of bash history
   read -rs -p 'Gemini API key: ' K && printf 'GEMINI_API_KEY=%s\n' "\$K" >> .env && unset K
