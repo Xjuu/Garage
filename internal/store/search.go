@@ -55,6 +55,20 @@ func (s *Store) GlobalSearch(q, from, to string) (*GlobalResults, error) {
 	if out.Vehicles, err = s.searchVehicles(q, like, dateClause, dateArgs); err != nil {
 		return nil, err
 	}
+	// Registry-only cars are appended after the invoiced ones: a vehicle you
+	// have actually spent money on is the more likely thing being looked for.
+	if len(out.Vehicles) < perKind {
+		onFleet, err := s.searchRegistry(q, like)
+		if err != nil {
+			return nil, err
+		}
+		for _, hit := range onFleet {
+			if len(out.Vehicles) >= perKind {
+				break
+			}
+			out.Vehicles = append(out.Vehicles, hit)
+		}
+	}
 	if out.Parts, err = s.searchParts(q, like, dateClause, dateArgs); err != nil {
 		return nil, err
 	}
@@ -140,6 +154,49 @@ func (s *Store) searchInvoices(q, like, dateClause string, dateArgs []any) ([]Hi
 			Title:    firstNonEmpty(supplier, "Invoice "+itoa(id)),
 			Subtitle: strings.TrimSpace(number + " " + reg),
 			Date:     date, Brutto: brutto, Count: 1,
+		})
+	}
+	return out, rows.Err()
+}
+
+// searchRegistry finds vehicles that are on the fleet but have never been
+// invoiced. Without it a car you own is unfindable until it first costs money,
+// which is exactly backwards — "have we ever spent anything on this one?" is a
+// question that needs an answer of zero, not silence.
+func (s *Store) searchRegistry(q, like string) ([]Hit, error) {
+	if q == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT v.registration, COALESCE(v.make,''), COALESCE(v.model,''),
+		       COALESCE(v.notes,''), COALESCE(c.name,'')
+		FROM vehicles v
+		LEFT JOIN companies c ON c.id = v.company_id
+		WHERE NOT EXISTS (SELECT 1 FROM invoices i WHERE i.vehicle_reg = v.registration)
+		  AND (LOWER(v.registration) LIKE ? OR LOWER(v.make) LIKE ?
+		       OR LOWER(v.model) LIKE ? OR LOWER(v.notes) LIKE ?)
+		ORDER BY v.registration LIMIT ?`, like, like, like, like, perKind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []Hit{}
+	for rows.Next() {
+		var reg, mk, model, notes, company string
+		if err := rows.Scan(&reg, &mk, &model, &notes, &company); err != nil {
+			return nil, err
+		}
+		sub := strings.TrimSpace(mk + " " + model)
+		if cs := callsignFrom(notes); cs != "" {
+			sub = strings.TrimSpace("callsign " + cs + " · " + sub)
+		}
+		if company != "" {
+			sub = strings.TrimSpace(sub + " · " + company)
+		}
+		out = append(out, Hit{
+			Kind: "vehicle", Ref: reg, Title: reg,
+			Subtitle: strings.TrimSpace(sub + " · no invoices yet"),
 		})
 	}
 	return out, rows.Err()

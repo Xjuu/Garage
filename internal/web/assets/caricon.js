@@ -81,8 +81,28 @@ const SHAPES = {
  * @param {string} model
  * @param {string} extraClass  "lg" on a detail page, "sm" in a dense table
  */
+// Filled in from /api/fleet-icons at start-up. Until it answers, the built-in
+// drawings are used — so the page never waits on artwork to render a table.
+const customIcons = {};
+
+function loadCustomIcons() {
+  return api('/api/fleet-icons')
+    .then((d) => Object.assign(customIcons, d.custom || {}))
+    .catch(() => {});
+}
+
 function carIcon(make, model, extraClass = '') {
   const style = bodyStyle(make, model);
+
+  // Supplied artwork wins. It will not invert with the theme the way the
+  // drawn silhouettes do — a picture is a picture — so it is only used when
+  // someone has deliberately provided one.
+  if (customIcons[style]) {
+    const label = [make, model].filter(Boolean).join(' ') || 'vehicle';
+    return `<img class="car art ${esc(extraClass)}" src="/api/fleet-icon/${esc(style)}"
+                 alt="${esc(label)}" loading="lazy">`;
+  }
+
   const shape = SHAPES[style];
   const label = [make, model].filter(Boolean).join(' ') || 'vehicle';
 

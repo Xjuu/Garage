@@ -127,6 +127,7 @@ func (s *Server) Listen(ctx context.Context, addr string) error {
 	api.HandleFunc("GET /api/export.xlsx", s.exportXLSX)
 	api.HandleFunc("GET /api/export.csv", s.exportCSV)
 	s.routeExports(api)
+	s.routeIcons(api)
 	api.HandleFunc("GET /api/doc", s.serveDoc)
 	s.routesFleet(api)
 	s.routesTraining(api)

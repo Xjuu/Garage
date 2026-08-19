@@ -34,8 +34,18 @@ async function loadVehicleDetail() {
   $('veh-title').innerHTML =
     `<span class="veh-hero">${carIcon(v.make, v.model, 'lg')}<span>${esc(v.registration)}</span></span>`;
   const bits = [v.make, v.model, v.year].filter(Boolean).join(' ');
-  $('veh-sub').textContent = [bits, v.company_name, v.driver ? 'driver ' + v.driver : '']
-    .filter(Boolean).join(' · ') || 'not in the registry yet';
+  // The callsign is the number the office actually uses on the radio, so it
+  // belongs in the heading of a vehicle's history rather than buried in notes.
+  const callsign = (v.notes || '').startsWith('Callsign ')
+    ? v.notes.slice('Callsign '.length).split(' · ')[0]
+    : '';
+
+  $('veh-sub').innerHTML = [
+    callsign ? `<span class="callsign">${esc(callsign)}</span>` : '',
+    esc(bits),
+    esc(v.company_name || ''),
+    v.driver ? 'driver ' + esc(v.driver) : '',
+  ].filter(Boolean).join(' · ') || 'not in the registry yet';
 
   $('veh-tiles').innerHTML = [
     { k: 'Gross spend', v: '£' + money(v.brutto) },
@@ -146,10 +156,64 @@ async function loadPartDetail() {
     tr.addEventListener('click', () => openInvoice(tr.dataset.id)));
 }
 
+/** Adding a vehicle by hand, for cars that never came from a dispatch export
+    — a new car, a courtesy vehicle, or one the export missed. Callsign is
+    stored the same way the importer stores it, so the two agree. */
+async function addVehicleToFleet() {
+  const reg = $('nv-reg').value.trim();
+  const status = $('nv-status');
+
+  if (!reg) {
+    status.innerHTML = '<span class="pill flag">Registration required</span>';
+    $('nv-reg').focus();
+    return;
+  }
+
+  const callsign = $('nv-callsign').value.trim();
+  const body = {
+    make: $('nv-make').value.trim(),
+    model: $('nv-model').value.trim(),
+    driver: $('nv-driver').value.trim(),
+    notes: callsign ? 'Callsign ' + callsign : '',
+    company_id: Number($('nv-company').value) || 0,
+    active: true,
+  };
+
+  const btn = $('nv-add');
+  btn.disabled = true;
+  status.textContent = 'Adding…';
+  try {
+    await api('/api/registry/' + encodeURIComponent(reg), { method: 'PUT', json: body });
+    status.innerHTML = `<span class="pill">Added</span> <span style="margin-left:8px">${esc(reg.toUpperCase())}</span>`;
+    // Clear the identity fields but keep company selected: adding several
+    // vehicles to the same firm in a row is the normal case.
+    for (const id of ['nv-reg', 'nv-callsign', 'nv-make', 'nv-model', 'nv-driver']) $(id).value = '';
+    $('nv-reg').focus();
+    loadFleet();
+  } catch (e) {
+    status.innerHTML = `<span class="pill flag">Failed</span> <span style="margin-left:8px">${esc(e.message)}</span>`;
+  }
+  btn.disabled = false;
+}
+
+$('nv-add').addEventListener('click', addVehicleToFleet);
+// Enter anywhere in the form submits, so a plate can be typed and added
+// without reaching for the mouse.
+for (const id of ['nv-reg', 'nv-callsign', 'nv-make', 'nv-model', 'nv-driver']) {
+  $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') addVehicleToFleet(); });
+}
+
 // ── fleet registry ────────────────────────────────────────────────────────
 
 async function loadFleet() {
   companies = await api('/api/companies');
+
+  // Keep the current choice across a reload so adding several vehicles to one
+  // company does not mean re-picking it every time.
+  const picked = $('nv-company').value;
+  $('nv-company').innerHTML = companies.map((c) =>
+    `<option value="${c.id}"${c.is_default ? ' data-default="1"' : ''}>${esc(c.name)}</option>`).join('');
+  if (picked) $('nv-company').value = picked;
 
   $('company-tiles').innerHTML = companies.map((c) => `
     <div class="tile">

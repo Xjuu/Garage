@@ -40,6 +40,7 @@ Usage:
   goldstar backup    Snapshot the database into data/backups and prune old ones
   goldstar fleet-import F  Load a vehicle export (Callsign,Make,Model,Registration)
                      into the registry. Shows what it would do; add --apply to write.
+                     --company "NAME" assigns every vehicle to that company.
   goldstar examples  Scan the examples folder for new reference invoices
   goldstar eval      Re-extract every completed example and score the accuracy
   goldstar serve     Serve the dashboard (default 127.0.0.1:8787)
@@ -123,8 +124,20 @@ func realMain(cmd string) error {
 		if len(os.Args) < 3 {
 			return fmt.Errorf("usage: goldstar fleet-import <vehicles.csv> [--apply]")
 		}
-		apply := len(os.Args) > 3 && os.Args[3] == "--apply"
-		rep, err := pipeline.ImportFleetCSV(db, os.Args[2], apply, logf)
+		apply := false
+		company := ""
+		for i := 3; i < len(os.Args); i++ {
+			switch {
+			case os.Args[i] == "--apply":
+				apply = true
+			case os.Args[i] == "--company" && i+1 < len(os.Args):
+				company = os.Args[i+1]
+				i++
+			case strings.HasPrefix(os.Args[i], "--company="):
+				company = strings.TrimPrefix(os.Args[i], "--company=")
+			}
+		}
+		rep, err := pipeline.ImportFleetCSV(db, os.Args[2], company, apply, logf)
 		if rep != nil {
 			printFleetReport(rep)
 		}

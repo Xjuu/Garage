@@ -374,6 +374,26 @@
       <thead><tr><th>Vehicle</th><th class="num">Invoices</th><th class="num">Gross</th>
         <th>Last seen</th><th></th></tr></thead>
       <tbody id="unassigned-rows"></tbody></table></div></div>
+    <div class="section-title">Add a vehicle</div>
+    <div class="panel" style="padding:16px 18px;margin-bottom:22px">
+      <div class="grid2" style="margin-bottom:12px">
+        <div class="field"><label for="nv-reg">Registration</label>
+          <input type="text" id="nv-reg" placeholder="AB12 CDE" autocomplete="off"></div>
+        <div class="field"><label for="nv-callsign">Callsign</label>
+          <input type="text" id="nv-callsign" placeholder="e.g. 210" autocomplete="off"></div>
+        <div class="field"><label for="nv-make">Make</label>
+          <input type="text" id="nv-make" placeholder="Toyota" autocomplete="off"></div>
+        <div class="field"><label for="nv-model">Model</label>
+          <input type="text" id="nv-model" placeholder="Corolla" autocomplete="off"></div>
+        <div class="field"><label for="nv-driver">Driver</label>
+          <input type="text" id="nv-driver" placeholder="optional" autocomplete="off"></div>
+        <div class="field"><label for="nv-company">Company</label>
+          <select id="nv-company"></select></div>
+      </div>
+      <button class="btn solid" id="nv-add">Add to fleet</button>
+      <span id="nv-status" style="margin-left:12px;font-size:13px"></span>
+    </div>
+
 
     <div class="section-title">Registry</div>
     <div class="panel"><div class="table-scroll"><table>

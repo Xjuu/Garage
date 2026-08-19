@@ -43,7 +43,7 @@ func TestImportFleetCleansAndRejects(t *testing.T) {
 75,SKODA,SUPERB,GV70HFK
 `
 	db := openDB(t)
-	rep, err := ImportFleetCSV(db, writeCSV(t, csv), true, nil)
+	rep, err := ImportFleetCSV(db, writeCSV(t, csv), "", true, nil)
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestImportPreservesHumanEnteredDetail(t *testing.T) {
 	}
 
 	csv := "Callsign,Make,Model,Registration\n210,SEAT,ALHAMBRA,DK18CXR\n"
-	if _, err := ImportFleetCSV(db, writeCSV(t, csv), true, nil); err != nil {
+	if _, err := ImportFleetCSV(db, writeCSV(t, csv), "", true, nil); err != nil {
 		t.Fatalf("import: %v", err)
 	}
 
@@ -116,7 +116,7 @@ func TestImportDryRunWritesNothing(t *testing.T) {
 	db := openDB(t)
 	csv := "Callsign,Make,Model,Registration\n210,SEAT,ALHAMBRA,DK18CXR\n"
 
-	rep, err := ImportFleetCSV(db, writeCSV(t, csv), false, nil)
+	rep, err := ImportFleetCSV(db, writeCSV(t, csv), "", false, nil)
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -125,5 +125,31 @@ func TestImportDryRunWritesNothing(t *testing.T) {
 	}
 	if _, err := db.GetVehicle("DK18CXR"); err == nil {
 		t.Error("a dry run created a vehicle")
+	}
+}
+
+// The whole fleet belongs to one operating company, so the import has to be
+// able to say so — otherwise every vehicle lands in the default catch-all and
+// has to be moved by hand, 300 times.
+func TestImportAssignsCompany(t *testing.T) {
+	db := openDB(t)
+	csv := "Callsign,Make,Model,Registration\n210,SEAT,ALHAMBRA,DK18CXR\n89,SKODA,OCTAVIA,FP18KSA\n"
+
+	if _, err := ImportFleetCSV(db, writeCSV(t, csv), "GOLDSTAR DIAMOND CARS", true, nil); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	for _, reg := range []string{"DK18CXR", "FP18KSA"} {
+		v, err := db.GetVehicle(reg)
+		if err != nil {
+			t.Fatalf("%s: %v", reg, err)
+		}
+		if v.CompanyName != "GOLDSTAR DIAMOND CARS" {
+			t.Errorf("%s is with %q, want GOLDSTAR DIAMOND CARS", reg, v.CompanyName)
+		}
+	}
+
+	// A name that does not exist must be reported, not silently ignored.
+	if _, err := ImportFleetCSV(db, writeCSV(t, csv), "No Such Firm", true, nil); err == nil {
+		t.Error("an unknown company was accepted")
 	}
 }

@@ -79,7 +79,29 @@ func titleCase(s string) string {
 // Nothing is written unless apply is true, so the operator can see the effect
 // first — a bulk write over a fleet registry is not something to discover
 // after the fact.
-func ImportFleetCSV(db *store.Store, path string, apply bool, logf LogFunc) (*FleetReport, error) {
+// company, when non-empty, names the company every imported vehicle is
+// assigned to. Left empty, existing assignments are preserved and new vehicles
+// fall to the default company.
+func ImportFleetCSV(db *store.Store, path, company string, apply bool, logf LogFunc) (*FleetReport, error) {
+	var companyID *int64
+	if strings.TrimSpace(company) != "" {
+		companies, err := db.Companies()
+		if err != nil {
+			return nil, err
+		}
+		var names []string
+		for i := range companies {
+			names = append(names, companies[i].Name)
+			if strings.EqualFold(companies[i].Name, company) {
+				id := companies[i].ID
+				companyID = &id
+			}
+		}
+		if companyID == nil {
+			return nil, fmt.Errorf("no company called %q; known: %s", company, strings.Join(names, ", "))
+		}
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -179,6 +201,9 @@ func ImportFleetCSV(db *store.Store, path string, apply bool, logf LogFunc) (*Fl
 		// about drivers or which company a car belongs to, so importing must
 		// not blank them.
 		patch := store.VehiclePatch{Make: &row.Make, Model: &row.Model, Notes: &note}
+		if companyID != nil {
+			patch.CompanyID = companyID
+		}
 		if cur, err := db.GetVehicle(reg); err == nil && cur != nil {
 			rep.Updated++
 			if cur.Driver != "" {
@@ -187,7 +212,8 @@ func ImportFleetCSV(db *store.Store, path string, apply bool, logf LogFunc) (*Fl
 			if cur.Year != "" {
 				patch.Year = &cur.Year
 			}
-			if cur.CompanyID != nil {
+			// An explicit --company wins; otherwise keep where the vehicle is.
+			if companyID == nil && cur.CompanyID != nil {
 				patch.CompanyID = cur.CompanyID
 			}
 			patch.Active = &cur.Active

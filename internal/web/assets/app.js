@@ -771,6 +771,8 @@ Object.assign(viewLoaders, {
 // after all classic scripts in the document have executed, which is exactly
 // the guarantee needed.
 document.addEventListener('DOMContentLoaded', () => {
+  // Artwork first, so the first table drawn already uses it if present.
+  loadCustomIcons().finally(() => show(state.view));
   loadFilters().catch(() => {});
   show('overview');
   refreshCounts().catch(() => {});
