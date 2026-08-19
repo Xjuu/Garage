@@ -1,4 +1,4 @@
-package web
+package pipeline
 
 import (
 	"fmt"
@@ -17,13 +17,15 @@ import (
 // a file someone put in the folder by hand.
 const backupPrefix = "goldstar-backup-"
 
-// runBackup writes a snapshot of the database and prunes old ones.
+// RunBackup writes a snapshot of the database and prunes old ones.
 //
 // VACUUM INTO is used rather than copying the file, because a plain copy of a
 // live SQLite database in WAL mode can capture a torn state — the .db without
 // the pages still sitting in the write-ahead log. VACUUM INTO produces a
 // complete, already-compacted database and is safe while the app is running.
-func runBackup(cfg *config.Config, db *store.Store) (string, error) {
+// RunBackup is used by the nightly scheduler, the Admin page and the CLI, so
+// a backup taken by hand is identical to one taken automatically.
+func RunBackup(cfg *config.Config, db *store.Store) (string, error) {
 	if cfg.BackupKeep <= 0 {
 		return "", nil // disabled
 	}
@@ -76,8 +78,8 @@ func pruneBackups(dir string, keep int) error {
 	return nil
 }
 
-// backupStatus describes the snapshots for the Admin page.
-func backupStatus(cfg *config.Config) map[string]any {
+// BackupStatus describes the snapshots for the Admin page.
+func BackupStatus(cfg *config.Config) map[string]any {
 	out := map[string]any{
 		"enabled": cfg.BackupKeep > 0,
 		"keep":    cfg.BackupKeep,

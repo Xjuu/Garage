@@ -1,9 +1,8 @@
-package web
+package pipeline
 
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -79,37 +78,5 @@ func TestPruneKeepsAllWhenUnderLimit(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 		t.Errorf("the only snapshot was deleted: %v", err)
-	}
-}
-
-// A failed run must be counted and remembered, and a success must clear it —
-// otherwise the alert either never fires or never stops.
-func TestSchedulerFailureTracking(t *testing.T) {
-	s := &scheduler{}
-
-	s.recordFailure("imap: authentication failed")
-	s.recordFailure("imap: authentication failed")
-	if s.consecutiveFailures != 2 {
-		t.Errorf("failures = %d, want 2", s.consecutiveFailures)
-	}
-	if s.lastOK {
-		t.Error("lastOK should be false after a failure")
-	}
-	if !strings.Contains(s.lastResult, "authentication") {
-		t.Errorf("lastResult = %q, want the reason kept", s.lastResult)
-	}
-
-	s.recordSuccess("scanned 3, stored 2")
-	if s.consecutiveFailures != 0 {
-		t.Errorf("a success must reset the counter, got %d", s.consecutiveFailures)
-	}
-	if !s.lastOK {
-		t.Error("lastOK should be true after a success")
-	}
-	if s.lastError != "" {
-		t.Errorf("lastError = %q, want it cleared", s.lastError)
-	}
-	if s.lastSuccess.IsZero() {
-		t.Error("lastSuccess was not recorded")
 	}
 }

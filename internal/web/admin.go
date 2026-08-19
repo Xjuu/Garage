@@ -47,7 +47,7 @@ func (s *Server) adminStatus(r *http.Request) (any, error) {
 	hints, _ := s.db.Hints()
 
 	return map[string]any{
-		"backups":        backupStatus(s.cfg),
+		"backups":        pipeline.BackupStatus(s.cfg),
 		"schedule":       s.sched.Status(),
 		"data_dir":       s.cfg.DataDir,
 		"database":       s.cfg.DBPath(),
@@ -247,7 +247,7 @@ func (s *Server) backupNow(r *http.Request) (any, error) {
 		return nil, fail(http.StatusBadRequest,
 			"automatic backups are switched off (GOLDSTAR_BACKUP_KEEP=0)")
 	}
-	path, err := runBackup(s.cfg, s.db)
+	path, err := pipeline.RunBackup(s.cfg, s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +257,7 @@ func (s *Server) backupNow(r *http.Request) (any, error) {
 	}
 	return map[string]any{
 		"ok": true, "name": filepath.Base(path), "bytes": info.Size(),
-		"status": backupStatus(s.cfg),
+		"status": pipeline.BackupStatus(s.cfg),
 	}, nil
 }
 

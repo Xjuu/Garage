@@ -37,6 +37,7 @@ Usage:
   goldstar fetch     Fetch and extract new invoices only
   goldstar ingest F  Extract invoices from local PDF or image files
   goldstar export    Write an Excel export from what is already stored
+  goldstar backup    Snapshot the database into data/backups and prune old ones
   goldstar examples  Scan the examples folder for new reference invoices
   goldstar eval      Re-extract every completed example and score the accuracy
   goldstar serve     Serve the dashboard (default 127.0.0.1:8787)
@@ -116,6 +117,16 @@ func realMain(cmd string) error {
 		return err
 	case "export":
 		return runExport(cfg, db)
+	case "backup":
+		path, err := pipeline.RunBackup(cfg, db)
+		if err != nil {
+			return err
+		}
+		if path == "" {
+			return fmt.Errorf("backups are disabled (GOLDSTAR_BACKUP_KEEP=0)")
+		}
+		log.Printf("wrote %s", path)
+		return nil
 	case "examples":
 		added, seen, err := pipeline.ScanExamples(cfg, db, logf)
 		if err != nil {

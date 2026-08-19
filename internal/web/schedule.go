@@ -162,7 +162,7 @@ func (s *scheduler) fire() {
 
 		// Snapshot before ingesting, not after: if a bad run corrupts or
 		// pollutes the data, the backup you want is the one taken beforehand.
-		if path, bErr := runBackup(s.cfg, s.srv.db); bErr != nil {
+		if path, bErr := pipeline.RunBackup(s.cfg, s.srv.db); bErr != nil {
 			logLine("backup failed: " + bErr.Error())
 			s.recordFailure("backup failed: " + bErr.Error())
 		} else if path != "" {
