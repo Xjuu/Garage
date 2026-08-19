@@ -891,11 +891,16 @@ tr:hover .veh .car, .veh:hover .car { opacity: 1; }
    icon is in use. Sized in CSS with width and height also set on the element,
    so the row never reflows as images arrive. */
 .car.art {
-  width: 38px; height: 38px;
-  border-radius: 8px;
-  object-fit: cover;
+  width: 60px; height: 60px;
+  border-radius: 10px;
+  object-fit: contain;
   background: var(--g05);
   opacity: 1;
 }
-.car.art.lg { width: 64px; height: 64px; border-radius: 12px; }
+.car.art.lg { width: 128px; height: 128px; border-radius: 16px; }
 .veh .car.art { opacity: 1; }
+
+/* The tile carries its own breathing room rather than the row being widened
+   with :has(), so the layout does not depend on selector support and behaves
+   the same whether a row shows artwork or a drawn silhouette. */
+.car.art { margin: 5px 4px 5px 0; }
