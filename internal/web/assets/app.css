@@ -834,12 +834,12 @@ td.strong { font-weight: 700; }
    with no second asset and no JavaScript watching the colour scheme. */
 
 .car {
-  width: 88px; height: 38px;
+  width: 64px; height: 28px;
   flex-shrink: 0;
   color: inherit;
   overflow: visible;
 }
-.car.lg { width: 156px; height: 66px; }
+.car.lg { width: 140px; height: 60px; }
 
 .car-body, .car-tyre, .car-sign { fill: currentColor; }
 
@@ -876,8 +876,16 @@ tr:hover .veh .car, .veh:hover .car { opacity: 1; }
 }
 
 /* Detail-page header: the car sits beside the plate at a larger size. */
-.veh-hero { display: flex; align-items: center; gap: 14px; }
-.veh-hero .car { opacity: 1; }
+/* The heading pairs a large plate with the vehicle. Aligning on the centre and
+   letting the image keep its own box stops it sitting high against the text. */
+.veh-hero {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  vertical-align: middle;
+}
+.veh-hero .car { opacity: 1; flex: 0 0 auto; }
+.veh-hero > span:last-child { line-height: 1; }
 
 /* The vehicle page heading carries the callsign badge alongside the specs. */
 .view-head .sub .callsign { vertical-align: 1px; margin-right: 2px; }
@@ -894,8 +902,8 @@ tr:hover .veh .car, .veh:hover .car { opacity: 1; }
   /* Sized in one place: every table, the overview and the registry all read
      from here, so "everywhere" stays one number rather than several that
      drift apart. */
-  width: var(--car-size, 240px);
-  height: var(--car-size, 240px);
+  width: var(--car-size, 64px);
+  height: var(--car-size, 64px);
   object-fit: contain;
   /* No tile behind them any more: the artwork carries its own transparency,
      so it sits directly on whatever the row's background happens to be. */
@@ -903,7 +911,7 @@ tr:hover .veh .car, .veh:hover .car { opacity: 1; }
   border-radius: 0;
   opacity: 1;
 }
-.car.art.lg { --car-size: 512px; border-radius: 0; }
+.car.art.lg { --car-size: 140px; border-radius: 0; }
 .veh .car.art { opacity: 1; }
 
 /* The tile carries its own breathing room rather than the row being widened
@@ -911,22 +919,28 @@ tr:hover .veh .car, .veh:hover .car { opacity: 1; }
    the same whether a row shows artwork or a drawn silhouette. */
 .car.art { margin: 5px 4px 5px 0; }
 
-/* Sits under the content on every view, quiet enough not to compete with the
-   figures but present on each page rather than tucked away on one of them. */
+/* In the top bar beside the brand, so it is on every page without a footer
+   competing for the bottom of a long table. Hidden on narrow screens, where
+   the bar has only room for the actions. */
 .credit {
-  max-width: 1500px;
-  margin: 0 auto;
-  padding: 28px var(--pad) 40px;
+  font-size: 12px;
+  color: var(--g4);
+  letter-spacing: .02em;
+  white-space: nowrap;
+  padding-left: 14px;
+  margin-left: 2px;
+  border-left: 1px solid var(--g2);
+}
+@media (max-width: 900px) { .topbar .credit { display: none; } }
+
+/* The sign-in page has no top bar to sit in, and centres its card in a
+   full-height grid — so there the credit pins to the bottom of the viewport. */
+.credit-login {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  padding-bottom: 22px;
   text-align: center;
   font-size: 12px;
   color: var(--g4);
   letter-spacing: .02em;
-}
-
-/* The sign-in page centres a card in a full-height grid, so a footer after it
-   would sit below the fold. There it pins to the bottom of the viewport. */
-.login-wrap ~ .credit {
-  position: fixed;
-  left: 0; right: 0; bottom: 0;
-  padding: 0 0 22px;
 }

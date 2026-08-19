@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -69,4 +70,55 @@ func staticHandler(files fs.FS) http.Handler {
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// assetRef matches the stylesheet and script URLs in the served HTML.
+var assetRef = regexp.MustCompile(`/static/([A-Za-z0-9._-]+\.(?:css|js))`)
+
+// versionAssets rewrites /static/app.css into /static/app.css?v=<hash>.
+//
+// Validation headers are not enough on their own once a CDN sits in front. An
+// edge cache holding an old stylesheet keeps serving it for its whole TTL, so
+// a deployed change is invisible to everyone behind that cache — which is
+// exactly what happened here: hours of CSS changes never reached the browser
+// while the origin served them correctly all along.
+//
+// Putting the content hash in the URL removes the possibility entirely. A
+// changed file has an address no cache has ever seen, so there is nothing
+// stale to serve; an unchanged one keeps its address and stays cached.
+func versionAssets(page []byte) []byte {
+	return assetRef.ReplaceAllFunc(page, func(match []byte) []byte {
+		name := string(assetRef.FindSubmatch(match)[1])
+		sum, err := assetHash(name)
+		if err != nil {
+			return match // serve it unversioned rather than break the page
+		}
+		return append(match, []byte("?v="+sum)...)
+	})
+}
+
+var (
+	hashMu    sync.RWMutex
+	hashCache = map[string]string{}
+)
+
+func assetHash(name string) (string, error) {
+	hashMu.RLock()
+	sum, ok := hashCache[name]
+	hashMu.RUnlock()
+	if ok {
+		return sum, nil
+	}
+
+	b, err := assets.ReadFile("assets/" + name)
+	if err != nil {
+		return "", err
+	}
+	raw := sha256.Sum256(b)
+	sum = hex.EncodeToString(raw[:])[:12]
+
+	hashMu.Lock()
+	hashCache[name] = sum
+	hashMu.Unlock()
+	return sum, nil
 }

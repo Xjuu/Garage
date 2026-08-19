@@ -268,7 +268,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Write(b)
+	w.Write(versionAssets(b))
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
