@@ -32,9 +32,13 @@
     <div class="omni-wrap">
       <svg class="omni-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
       <input type="search" id="omni" autocomplete="off"
+             role="combobox" aria-expanded="false" aria-controls="omni-results" aria-autocomplete="list"
              placeholder="Search everything — registration, part number, supplier, invoice number…">
       <button class="omni-clear" id="omni-clear" aria-label="Clear" hidden>✕</button>
     </div>
+    <span class="omni-hint" title="Press Return anywhere on the page to jump straight to search">
+      <kbd>↵</kbd> to search
+    </span>
     <div class="omni-dates">
       <label for="omni-from">From</label>
       <input type="date" id="omni-from">
@@ -42,7 +46,7 @@
       <input type="date" id="omni-to">
       <button class="btn sm" id="omni-range-clear">Any date</button>
     </div>
-    <div class="omni-results" id="omni-results" hidden></div>
+    <div class="omni-results" id="omni-results" role="listbox" hidden></div>
   </div>
   <nav class="tabs" role="tablist" id="tabs"></nav>
   <div class="subtabs" id="subtabs"></div>

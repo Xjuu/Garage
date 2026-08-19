@@ -20,9 +20,37 @@ function omniQuery() {
   };
 }
 
+// The index of the currently highlighted hit, within the flat list of
+// buttons rendered in DOM order (vehicles, then parts, suppliers, invoices —
+// the same order renderOmni draws them in). Reset to 0 on every new render:
+// a fresh set of results makes whatever position the arrow keys had reached
+// in the old list meaningless.
+let omniIndex = 0;
+
+function omniHits() {
+  return omniResults.hidden ? [] : [...omniResults.querySelectorAll('.omni-hit')];
+}
+
+/** Moves the "this is what Enter opens" marker onto one hit and off every
+    other. Also drives aria-activedescendant, so a screen reader announces
+    the same row the sighted highlight points at — this is a real listbox,
+    not just a decorated list of buttons. */
+function selectOmniHit(hits, index) {
+  hits.forEach((el, i) => el.classList.toggle('selected', i === index));
+  const chosen = hits[index];
+  if (chosen) {
+    omni.setAttribute('aria-activedescendant', chosen.id);
+    chosen.scrollIntoView({ block: 'nearest' });
+  } else {
+    omni.removeAttribute('aria-activedescendant');
+  }
+}
+
 function closeOmni() {
   omniResults.hidden = true;
   omniResults.innerHTML = '';
+  omni.setAttribute('aria-expanded', 'false');
+  omni.removeAttribute('aria-activedescendant');
 }
 
 /** Called once a result has actually been picked — by click or by Enter on
@@ -37,12 +65,15 @@ function resetOmni() {
 }
 
 /** A hit row. Amount means gross for invoices/vehicles/suppliers and net for
-    parts, so each row is labelled rather than leaving the reader to guess. */
-function hitRow(h) {
+    parts, so each row is labelled rather than leaving the reader to guess.
+    `index` is the row's position in the flat, whole-dropdown list — not its
+    position within its own group — so it lines up with omniIndex. */
+function hitRow(h, index) {
   const amountLabel = h.kind === 'part' ? 'net' : 'gross';
   const countLabel = h.kind === 'invoice' ? '' : `<small>${int(h.count)}×</small>`;
   return `
-    <button class="omni-hit" data-kind="${esc(h.kind)}" data-ref="${esc(h.ref)}">
+    <button class="omni-hit" id="omni-hit-${index}" role="option"
+            data-kind="${esc(h.kind)}" data-ref="${esc(h.ref)}">
       <span class="kind">${KIND_BADGE[h.kind] || '?'}</span>
       <span class="body">
         <span class="t">${esc(h.title)}</span>
@@ -53,31 +84,41 @@ function hitRow(h) {
 }
 
 function renderOmni(res) {
+  omni.setAttribute('aria-expanded', 'true');
+
   if (!res.total) {
     omniResults.innerHTML = '<div class="omni-empty">Nothing matches that.</div>';
     omniResults.hidden = false;
+    omni.removeAttribute('aria-activedescendant');
     return;
   }
 
   let html = '';
+  let index = 0;
   for (const kind of ['vehicles', 'parts', 'suppliers', 'invoices']) {
     const hits = res[kind] || [];
     if (!hits.length) continue;
     html += `<div class="omni-group-title">${KIND_LABEL[hits[0].kind]}</div>`;
-    html += hits.map(hitRow).join('');
+    html += hits.map((h) => hitRow(h, index++)).join('');
   }
   omniResults.innerHTML = html;
   omniResults.hidden = false;
 
-  omniResults.querySelectorAll('.omni-hit').forEach((b) =>
+  const hits = omniHits();
+  hits.forEach((b, i) => {
     b.addEventListener('click', () => {
       openHit(b.dataset.kind, b.dataset.ref);
       resetOmni();
-    }));
+    });
+    // Hovering a row with the mouse moves the keyboard selection onto it
+    // too, so the highlight and Enter never disagree about which hit is
+    // "the" one — without this, arrowing to row 3 and then hovering row 1
+    // would leave both looking selected in different ways.
+    b.addEventListener('mouseenter', () => selectOmniHit(hits, i));
+  });
 
-  // The first hit rendered is what Enter opens, so it is marked to show that
-  // rather than leaving the shortcut invisible.
-  omniResults.querySelector('.omni-hit')?.classList.add('top');
+  omniIndex = 0;
+  selectOmniHit(hits, omniIndex);
 }
 
 /** Send the date range along when jumping to the invoice list, so a search
@@ -121,10 +162,33 @@ omni.addEventListener('focus', () => { if (omniResults.innerHTML) omniResults.hi
 $('omni-from').addEventListener('change', runOmni);
 $('omni-to').addEventListener('change', runOmni);
 
-// Enter opens the top result — the first hit rendered, which is also the one
-// marked with .top. Vehicles, parts and suppliers rank above invoices, so
-// typing a plate and pressing Enter goes straight to that vehicle rather than
-// to a filtered list containing it.
+// Up/Down move the highlight among however many hits are showing, without
+// touching the typed query or re-running the search — this is purely about
+// which row Enter will act on next.
+omni.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const hits = omniHits();
+  if (!hits.length) return;
+
+  // Left unhandled, Up/Down do nothing useful in a single-line text input
+  // anyway — this just makes the takeover explicit instead of relying on
+  // that being true in every browser.
+  e.preventDefault();
+
+  // Clamped rather than wrapped: running off the end of the list and
+  // silently landing back at the top is a worse surprise than the highlight
+  // simply stopping at the last row.
+  omniIndex = e.key === 'ArrowDown'
+    ? Math.min(omniIndex + 1, hits.length - 1)
+    : Math.max(omniIndex - 1, 0);
+  selectOmniHit(hits, omniIndex);
+});
+
+// Enter opens whichever hit is currently highlighted — the first one by
+// default, or wherever the arrow keys or a mouse hover last moved it to.
+// Vehicles, parts and suppliers rank above invoices, so typing a plate and
+// pressing Enter goes straight to that vehicle rather than to a filtered
+// list containing it.
 //
 // Falling back to the filtered invoice list only when there is no hit to open
 // — a date-only search, or a query that matched nothing — keeps that jump as
@@ -140,9 +204,10 @@ omni.addEventListener('keydown', (e) => {
   // refocus it, undoing the reset in the same keystroke.
   e.stopPropagation();
 
-  const topHit = !omniResults.hidden && omniResults.querySelector('.omni-hit.top');
-  if (topHit) {
-    openHit(topHit.dataset.kind, topHit.dataset.ref);
+  const hits = omniHits();
+  const selected = hits[omniIndex];
+  if (selected) {
+    openHit(selected.dataset.kind, selected.dataset.ref);
     resetOmni();
     return;
   }
