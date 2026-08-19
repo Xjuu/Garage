@@ -254,3 +254,4 @@ journalctl --user -u goldstar.service -n 50
 The timer uses `Persistent=true`, so a day missed with the machine off runs as
 soon as it next boots. `install.sh` enables lingering; without it a user timer
 would not fire unless someone were logged in.
+# Garage
