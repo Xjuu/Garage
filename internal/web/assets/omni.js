@@ -213,6 +213,14 @@ omni.addEventListener('keydown', (e) => {
   }
 
   const { q, from, to } = omniQuery();
+
+  // Nothing was actually searched — an empty bar with no date range — so
+  // there is nothing to fall back to. Pressing Return here (most often right
+  // after the "Return focuses search" shortcut put the cursor here with
+  // nothing typed yet) must do nothing, not silently jump to the unfiltered
+  // Invoices tab.
+  if (!q && !from && !to) return;
+
   state.filters = { q, from, to, supplier: '', reg: '', review: '' };
   $('f-q').value = q;
   $('f-from').value = from;

@@ -110,6 +110,7 @@ const store = {
 
 const documentListeners = { keydown: [], click: [] };
 const opened = [];
+const shown = [];
 const ctx = vm.createContext({
   console,
   $: (id) => store[id] ??= mkEl(id),
@@ -123,7 +124,7 @@ const ctx = vm.createContext({
   },
   api: async () => ({}),
   state: { filters: {}, page: 1 },
-  show: () => {},
+  show: (view) => shown.push(view),
   openVehicle: (ref) => opened.push(['vehicle', ref]),
   openPart: (ref) => opened.push(['part', ref]),
   openInvoice: (ref) => opened.push(['invoice', ref]),
@@ -229,25 +230,51 @@ let threw = false;
 try { dispatchKeydown(omniEl, 'ArrowDown'); } catch { threw = true; }
 check('ArrowDown with the dropdown closed does not throw', !threw);
 
-// 7. Return with nothing focused reaches the search bar (the original ask
-//    from the previous change, kept as a guard against a future regression).
+// 7. The reported bug, reproduced exactly: Return with nothing focused
+//    (jumps to the empty search bar), then Return again with still nothing
+//    typed and no date range. Nothing was ever searched, so the second
+//    Return must do nothing — not silently land on the unfiltered Invoices
+//    tab, which is what an empty double-Return used to do.
 activeElement = bodyEl;
-dispatchKeydown({ _listeners: {} }, 'Enter');
-check('Return with nothing focused moves focus to search', activeElement === omniEl);
+omniEl.value = '';
+shown.length = 0;
+dispatchKeydown({ _listeners: {} }, 'Enter'); // 1st Return: focuses the bar
+check('first Return (nothing focused) reaches the search bar', activeElement === omniEl);
+dispatchKeydown(omniEl, 'Enter'); // 2nd Return: bar is focused but still empty
+check('second Return on a still-empty bar does not navigate anywhere', shown.length === 0);
 
-// 8. Return must not steal a focused button's own activation.
+// 8. The two cases the fallback exists FOR must still work: a query that
+//    matched nothing, and a date-only search with no query at all. Scenario
+//    7 must not have thrown these out along with the empty-bar case.
+omniEl.focus();
+omniEl.value = 'no such plate';
+ctx.renderOmni({ total: 0, vehicles: [], parts: [], suppliers: [], invoices: [] });
+shown.length = 0;
+dispatchKeydown(omniEl, 'Enter');
+check('a query that matched nothing still falls back to the Invoices tab', shown[0] === 'invoices');
+
+omniEl.focus();
+omniEl.value = '';
+store['omni-from'].value = '2026-08-01';
+ctx.closeOmni(); // no query typed, so nothing was ever rendered — just a date set
+shown.length = 0;
+dispatchKeydown(omniEl, 'Enter');
+check('a date-only search still falls back to the Invoices tab', shown[0] === 'invoices');
+store['omni-from'].value = '';
+
+// 9. Return must not steal a focused button's own activation.
 activeElement = clearBtn;
 dispatchKeydown({ _listeners: {} }, 'Enter');
 check('Return does not steal focus from a focused button', activeElement === clearBtn);
 
-// 9. Return must not reach a search bar hidden behind an open dialog.
+// 10. Return must not reach a search bar hidden behind an open dialog.
 activeElement = bodyEl;
 store['gen-modal'].hidden = false;
 dispatchKeydown({ _listeners: {} }, 'Enter');
 check('Return is ignored while a modal dialog is open', activeElement === bodyEl);
 store['gen-modal'].hidden = true;
 
-// 10. "/" is unrelated to this change and must still work exactly as
+// 11. "/" is unrelated to this change and must still work exactly as
 //     before, including through a focused button — its guard was
 //     intentionally left untouched.
 activeElement = clearBtn;
