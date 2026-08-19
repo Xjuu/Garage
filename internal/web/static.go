@@ -93,7 +93,12 @@ func versionAssets(page []byte) []byte {
 		if err != nil {
 			return match // serve it unversioned rather than break the page
 		}
-		return append(match, []byte("?v="+sum)...)
+		// A new slice, never append to `match`: ReplaceAllFunc hands back a
+		// window into the source buffer, so appending to it writes over the
+		// bytes that follow and corrupts the page.
+		out := make([]byte, 0, len(match)+16)
+		out = append(out, match...)
+		return append(out, "?v="+sum...)
 	})
 }
 
