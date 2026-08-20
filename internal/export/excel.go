@@ -83,7 +83,7 @@ func flattenItems(invoices []store.Invoice) []itemRow {
 
 var invoiceHeaders = []string{
 	"Invoice date", "Supplier", "Invoice no.", "Vehicle reg", "Currency",
-	"Netto", "VAT rate %", "VAT", "Brutto", "Lines", "Needs review", "Notes", "Source file",
+	"Netto", "VAT rate %", "VAT", "Brutto", "Parts", "Needs review", "Notes", "Source file",
 }
 
 var itemHeaders = []string{

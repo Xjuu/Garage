@@ -190,6 +190,20 @@ INSERT OR IGNORE INTO companies (name, is_default, created_at) VALUES
   ('Overall Clients',       1, datetime('now'));
 `
 
+// backfillOrphanVehicles catches any plate that already has invoices but
+// predates ensureVehicleRegistered (or a restored backup, or a row deleted by
+// hand) — registered here under the default company so its cost joins every
+// company's total on this and every future startup, not just for invoices
+// stored from now on. INSERT OR IGNORE makes re-running it on every restart
+// free: nothing happens once every plate already has a row.
+const backfillOrphanVehicles = `
+INSERT OR IGNORE INTO vehicles (registration, company_id, make, model, year, driver, notes, active, created_at)
+SELECT DISTINCT i.vehicle_reg, (SELECT id FROM companies WHERE is_default = 1), '', '', '', '', '', 1, datetime('now')
+FROM invoices i
+WHERE i.vehicle_reg <> ''
+  AND NOT EXISTS (SELECT 1 FROM vehicles v WHERE v.registration = i.vehicle_reg);
+`
+
 func Open(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
@@ -206,6 +220,10 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(seed); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("seed companies: %w", err)
+	}
+	if _, err := db.Exec(backfillOrphanVehicles); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("backfill orphan vehicles: %w", err)
 	}
 	return &Store{db: db}, nil
 }
@@ -312,6 +330,14 @@ func (s *Store) InsertInvoice(inv *Invoice) (int64, error) {
 	id, err := res.LastInsertId()
 	if err != nil {
 		return 0, err
+	}
+
+	// Give the vehicle a registry row now, in the same transaction, so its
+	// cost is never left out of every company's total between "first
+	// invoice seen" and "someone gets around to triaging it" — see
+	// ensureVehicleRegistered.
+	if err := ensureVehicleRegistered(tx, inv.VehicleReg); err != nil {
+		return 0, fmt.Errorf("register vehicle: %w", err)
 	}
 
 	for _, it := range inv.Items {

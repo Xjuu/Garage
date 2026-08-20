@@ -328,8 +328,38 @@ func (s *Store) DeleteVehicle(reg string) error {
 	return err
 }
 
+// ensureVehicleRegistered gives a plate seen on an invoice a registry row the
+// moment it is first stored, landing it in the default company (Overall
+// Clients) rather than leaving it to sit uncounted until someone notices it
+// on the "unregistered plates" list and clicks Add to fleet. Nothing here
+// overwrites an existing row — ON CONFLICT DO NOTHING — so a vehicle already
+// assigned to a real company is never bumped back to the default.
+//
+// Run inside the same transaction as the invoice write, so a car's very first
+// invoice is never the one invoice missing from every company's total.
+func ensureVehicleRegistered(tx *sql.Tx, reg string) error {
+	reg = NormalizeReg(reg)
+	if reg == "" {
+		return nil
+	}
+	var def sql.NullInt64
+	if err := tx.QueryRow(`SELECT id FROM companies WHERE is_default = 1 LIMIT 1`).Scan(&def); err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	_, err := tx.Exec(`
+		INSERT INTO vehicles (registration, company_id, make, model, year, driver, notes, active, created_at)
+		VALUES (?, ?, '', '', '', '', '', 1, ?)
+		ON CONFLICT(registration) DO NOTHING`,
+		reg, def, now())
+	return err
+}
+
 // UnassignedVehicles are plates that appear on invoices but are not in the
-// registry yet — the triage list.
+// registry yet. In normal operation this stays empty — ensureVehicleRegistered
+// registers a plate the moment its first invoice is stored — so anything that
+// does show up here got in some other way (a restored backup made before this
+// existed, a row deleted by hand) and is worth a look rather than routine
+// triage.
 func (s *Store) UnassignedVehicles() ([]VehicleAgg, error) {
 	rows, err := s.db.Query(`
 		SELECT i.vehicle_reg, COUNT(1), 0,
