@@ -179,55 +179,6 @@ CREATE TABLE IF NOT EXISTS eval_runs (
   fields_all  INTEGER NOT NULL DEFAULT 0,
   detail_json TEXT NOT NULL DEFAULT ''
 );
-
--- Parts counter (parts.<domain>) ---------------------------------------------
-
--- Every time a worker logs taking a part for a vehicle. Stock on hand for a
--- part is (everything ever invoiced for it) minus (everything ever taken) —
--- there is no separate "receive stock" step; a part arrives the moment its
--- invoice is stored, which the rest of the app already tracks.
-CREATE TABLE IF NOT EXISTS stock_takes (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  part_number TEXT NOT NULL,
-  vehicle_reg TEXT NOT NULL,
-  quantity    REAL NOT NULL,
-  device_id   TEXT NOT NULL DEFAULT '',
-  taken_at    TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_stock_takes_part ON stock_takes(part_number);
-
--- A device that has typed the correct PIN once. The cookie only ever carries
--- this id — revoking access is deleting (or deactivating) the row here, not
--- something that can be done by rotating a shared signing key, because that
--- would sign every device out at once instead of one.
-CREATE TABLE IF NOT EXISTS parts_devices (
-  id          TEXT PRIMARY KEY,
-  label       TEXT NOT NULL DEFAULT '',
-  active      INTEGER NOT NULL DEFAULT 1,
-  first_seen  TEXT NOT NULL,
-  last_seen   TEXT NOT NULL
-);
-
--- Empty table = deny everything, on purpose: the parts site refuses every
--- request until at least one address is added here from the main admin page.
-CREATE TABLE IF NOT EXISTS parts_allowed_ips (
-  ip         TEXT PRIMARY KEY,
-  label      TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL
-);
-
--- A part registered from the admin page rather than discovered on an
--- invoice — for something kept on the shelf that hasn't been bought through
--- a tracked supplier invoice yet. starting_stock is a standing offset added
--- into every stock calculation for this part number alongside whatever it
--- later picks up from real invoices, not a one-off adjustment that gets
--- consumed and forgotten.
-CREATE TABLE IF NOT EXISTS manual_parts (
-  part_number    TEXT PRIMARY KEY,
-  description    TEXT NOT NULL DEFAULT '',
-  starting_stock REAL NOT NULL DEFAULT 0,
-  created_at     TEXT NOT NULL
-);
 `
 
 // seed inserts the fleet the user actually operates. Overall Clients is the

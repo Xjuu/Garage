@@ -750,9 +750,6 @@ function renderParts() {
         (p.description || '').toLowerCase().includes(q))
     : state.parts;
 
-  // Negative stock means more has been logged as taken than was ever
-  // invoiced for that part — a real discrepancy worth a look, not something
-  // to quietly clamp to zero and hide.
   $('part-rows').innerHTML = rows.length
     ? rows.map((p) => `
         <tr class="clickable" data-part="${esc(p.part_number)}">
@@ -762,10 +759,9 @@ function renderParts() {
           <td class="num">${int(p.quantity)}</td>
           <td class="num strong">${money(p.netto)}</td>
           <td class="num">${int(p.vehicles)}</td>
-          <td class="num">${p.stock <= 0 ? `<span class="pill flag">${int(p.stock)}</span>` : int(p.stock)}</td>
           <td class="mono">${dash(p.last_date)}</td>
         </tr>`).join('')
-    : '<tr><td colspan="8" class="empty">No parts match</td></tr>';
+    : '<tr><td colspan="7" class="empty">No parts match</td></tr>';
 
   $('part-rows').querySelectorAll('tr[data-part]').forEach((tr) =>
     tr.addEventListener('click', () => openPart(tr.dataset.part)));

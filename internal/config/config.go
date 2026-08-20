@@ -77,11 +77,6 @@ type Config struct {
 	// the app over loopback, so binding to 127.0.0.1 is no evidence at all
 	// that the site is private.
 	AllowNoPassword bool
-
-	// PartsPIN gates parts.<domain> — the 6-digit code a worker types once
-	// per device. Empty disables the parts site entirely rather than
-	// falling back to no PIN at all.
-	PartsPIN string
 }
 
 // Load reads .env files (first found wins) then overlays real environment
@@ -119,7 +114,6 @@ func Load() (*Config, error) {
 		PasswordHash:    envStr("GOLDSTAR_PASSWORD_HASH", ""),
 		CookieSecure:    envBool("GOLDSTAR_COOKIE_SECURE", false),
 		AllowNoPassword: envBool("GOLDSTAR_ALLOW_NO_PASSWORD", false),
-		PartsPIN:        envStr("GOLDSTAR_PARTS_PIN", ""),
 	}
 
 	// Mailbox settings saved from the admin page override the .env file, since
@@ -158,11 +152,6 @@ func Load() (*Config, error) {
 	if b, err := os.ReadFile(c.TOTPFilePath()); err == nil {
 		if v := bytes.TrimSpace(b); len(v) > 0 {
 			c.TOTPSecret = string(v)
-		}
-	}
-	if b, err := os.ReadFile(c.PartsPINFilePath()); err == nil {
-		if v := bytes.TrimSpace(b); len(v) > 0 {
-			c.PartsPIN = string(v)
 		}
 	}
 	return c, nil
@@ -222,24 +211,6 @@ func (c *Config) ClearTOTPSecret() error {
 	}
 	return nil
 }
-
-// PartsPINFilePath holds a PIN set from the admin page, overriding .env —
-// same pattern as the dashboard password hash.
-func (c *Config) PartsPINFilePath() string { return filepath.Join(c.DataDir, "parts.pin") }
-
-// WritePartsPIN persists a new PIN, replacing any earlier one.
-func (c *Config) WritePartsPIN(pin string) error {
-	if err := os.MkdirAll(c.DataDir, 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(c.PartsPINFilePath(), []byte(strings.TrimSpace(pin)+"\n"), 0o600)
-}
-
-// PartsSessionKeyPath holds the HMAC key that signs parts-device cookies —
-// deliberately its own file, separate from the dashboard's SessionKeyPath:
-// the two auth systems have nothing to do with each other, and losing or
-// rotating one must never sign the other's users out.
-func (c *Config) PartsSessionKeyPath() string { return filepath.Join(c.DataDir, "parts-session.key") }
 
 // SessionKeyPath holds the HMAC key that signs session cookies. Deleting this
 // file logs everyone out.

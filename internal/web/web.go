@@ -25,7 +25,6 @@ import (
 	"goldstar/internal/config"
 	"goldstar/internal/export"
 	"goldstar/internal/jobs"
-	"goldstar/internal/partsauth"
 	"goldstar/internal/pipeline"
 	"goldstar/internal/store"
 )
@@ -38,14 +37,13 @@ var assets embed.FS
 const maxUploadBytes = 25 << 20
 
 type Server struct {
-	cfg       *config.Config
-	db        *store.Store
-	auth      *auth.Auth
-	jobs      *jobs.Runner
-	exports   *export.Catalogue
-	sched     *scheduler
-	logs      *logBuffer
-	partsAuth *partsauth.Auth
+	cfg     *config.Config
+	db      *store.Store
+	auth    *auth.Auth
+	jobs    *jobs.Runner
+	exports *export.Catalogue
+	sched   *scheduler
+	logs    *logBuffer
 }
 
 func New(cfg *config.Config, db *store.Store) (*Server, error) {
@@ -76,19 +74,10 @@ func New(cfg *config.Config, db *store.Store) (*Server, error) {
 		return nil, fmt.Errorf(
 			"refusing to bind %s without a password: that address is reachable from the network", cfg.WebAddr)
 	}
-	// Independent of the dashboard's own auth entirely — a missing or
-	// unset PIN just means the parts site refuses every request (see
-	// handlePartsRoot), not that goldstar itself fails to start.
-	pa, err := partsauth.New(cfg.PartsPIN, cfg.PartsSessionKeyPath(), cfg.CookieSecure)
-	if err != nil {
-		return nil, fmt.Errorf("parts auth: %w", err)
-	}
-
 	return &Server{
 		cfg: cfg, db: db, auth: a, jobs: jobs.New(),
-		exports:   export.NewCatalogue(cfg.ExportsDir()),
-		logs:      logs,
-		partsAuth: pa,
+		exports: export.NewCatalogue(cfg.ExportsDir()),
+		logs:    logs,
 	}, nil
 }
 
@@ -158,32 +147,11 @@ func (s *Server) Listen(ctx context.Context, addr string) error {
 	s.routesFleet(api)
 	s.routesTraining(api)
 	s.routesAdmin(api)
-	s.routesPartsAdmin(api)
 	mux.Handle("/api/", s.auth.Protect(api))
-
-	partsMux := s.partsRoutes(sub)
-
-	// One process, one port, two sites: which mux handles a request depends
-	// only on the Host header. Cloudflare terminates both hostnames onto
-	// this same local address, so there is nothing at the network level
-	// telling the two apart — this is the only place that distinction gets
-	// made, and everything downstream of it (auth, routes, data) is
-	// completely separate between the two.
-	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := r.Host
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = h
-		}
-		if strings.HasPrefix(host, "parts.") {
-			partsMux.ServeHTTP(w, r)
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           securityHeaders(router),
+		Handler:           securityHeaders(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

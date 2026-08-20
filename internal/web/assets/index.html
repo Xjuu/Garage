@@ -189,8 +189,7 @@
     <div class="panel"><div class="table-scroll">
       <table><thead><tr>
         <th>Part number</th><th>Description</th><th class="num">Times</th>
-        <th class="num">Qty</th><th class="num">Net</th><th class="num">Vehicles</th>
-        <th class="num">Stock</th><th>Last seen</th>
+        <th class="num">Qty</th><th class="num">Net</th><th class="num">Vehicles</th><th>Last seen</th>
       </tr></thead><tbody id="part-rows"></tbody></table>
     </div></div>
   </section>
@@ -573,63 +572,6 @@
         <button class="btn" id="vacuum-db">Compact database</button>
       </div>
     </div>
-
-    <div class="section-title">Parts counter — access</div>
-    <div class="panel" style="padding:16px 18px;margin-bottom:18px">
-      <div class="m" style="color:var(--g4);font-size:12px;margin-bottom:12px">
-        parts.&lt;your domain&gt; refuses every request until at least one
-        address is allowed below. Workers additionally need the 6-digit code.
-      </div>
-      <div class="grid2" style="margin-bottom:12px">
-        <div class="field"><label for="pi-ip">Allowed IP address</label>
-          <input type="text" id="pi-ip" placeholder="203.0.113.9" autocomplete="off"></div>
-        <div class="field"><label for="pi-label">Label</label>
-          <input type="text" id="pi-label" placeholder="e.g. workshop WiFi" autocomplete="off"></div>
-      </div>
-      <button class="btn" id="pi-add">Add address</button>
-      <div class="table-scroll" style="margin-top:14px"><table>
-        <thead><tr><th>Address</th><th>Label</th><th>Added</th><th></th></tr></thead>
-        <tbody id="pi-rows"></tbody></table></div>
-
-      <div class="grid2" style="margin:18px 0 12px">
-        <div class="field"><label for="pp-pin">New 6-digit code</label>
-          <input type="text" id="pp-pin" inputmode="numeric" maxlength="12" autocomplete="off"></div>
-      </div>
-      <button class="btn solid" id="pp-save">Change code</button>
-      <div id="pp-result" style="font-size:13px;margin-top:10px"></div>
-    </div>
-
-    <div class="section-title">Parts counter — catalog</div>
-    <div class="panel" style="padding:16px 18px;margin-bottom:18px">
-      <div class="m" style="color:var(--g4);font-size:12px;margin-bottom:12px">
-        Part search only finds part numbers that have appeared on an invoice.
-        Add one here to make it searchable on the counter before it's ever
-        been invoiced — useful for something already on the shelf. Adding
-        the same part number again edits it.
-      </div>
-      <div class="grid2" style="margin-bottom:12px">
-        <div class="field"><label for="pc-num">Part number</label>
-          <input type="text" id="pc-num" placeholder="e.g. JRP308W" autocomplete="off"></div>
-        <div class="field"><label for="pc-desc">Description</label>
-          <input type="text" id="pc-desc" placeholder="e.g. Number plate fixing screw" autocomplete="off"></div>
-        <div class="field"><label for="pc-stock">Starting stock</label>
-          <input type="number" id="pc-stock" value="0" min="0" step="any"></div>
-      </div>
-      <button class="btn" id="pc-add">Add part</button>
-      <div class="table-scroll" style="margin-top:14px"><table>
-        <thead><tr><th>Part</th><th>Description</th><th class="num">Starting stock</th><th>Added</th><th></th></tr></thead>
-        <tbody id="pc-rows"></tbody></table></div>
-    </div>
-
-    <div class="section-title">Parts counter — devices</div>
-    <div class="panel"><div class="table-scroll"><table>
-      <thead><tr><th>Device</th><th>First seen</th><th>Last seen</th><th>Status</th><th></th></tr></thead>
-      <tbody id="pd-rows"></tbody></table></div></div>
-
-    <div class="section-title">Parts counter — recent activity</div>
-    <div class="panel"><div class="table-scroll"><table>
-      <thead><tr><th>When</th><th>Part</th><th>Vehicle</th><th class="num">Qty</th><th>Device</th></tr></thead>
-      <tbody id="pt-rows"></tbody></table></div></div>
 
     <!-- TEMP: a quick way to see what the server has been doing without SSH
          access. Remove this section, its loadLogs()/setInterval in admin.js

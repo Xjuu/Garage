@@ -387,44 +387,24 @@ type PartAgg struct {
 	Netto      float64 `json:"netto"`
 	Vehicles   int     `json:"vehicles"`
 	LastDate   string  `json:"last_date"`
-	// Stock is what's left on the shelf: everything ever invoiced for this
-	// part, minus everything the parts counter has logged as taken. There is
-	// no separate "receive stock" step — a part arrives the moment its
-	// invoice is stored — so this is the true running count, not an estimate.
-	Stock float64 `json:"stock"`
 }
 
 // Parts ranks part numbers by spend, and counts how many distinct vehicles
-// each was fitted to — a part recurring across one vehicle suggests a
-// problem. Also includes parts registered by hand from Admin that have no
-// invoice history yet — they sort to the bottom (zero spend) but are
-// visible here the same as anywhere else stock is shown.
+// each was fitted to — a part recurring across one vehicle suggests a problem.
 func (s *Store) Parts() ([]PartAgg, error) {
 	rows, err := s.db.Query(`
-		SELECT part_number, description, times, quantity, netto, vehicles, last_date, stock FROM (
-			SELECT it.part_number AS part_number,
-			       MAX(it.description) AS description,
-			       COUNT(1) AS times,
-			       COALESCE(SUM(it.quantity),0) AS quantity,
-			       COALESCE(SUM(it.netto),0) AS netto,
-			       COUNT(DISTINCT COALESCE(NULLIF(it.vehicle_reg,''), i.vehicle_reg)) AS vehicles,
-			       MAX(i.invoice_date) AS last_date,
-			       COALESCE(SUM(it.quantity),0)
-			         - COALESCE((SELECT SUM(st.quantity) FROM stock_takes st WHERE st.part_number = it.part_number),0)
-			         + COALESCE((SELECT mp.starting_stock FROM manual_parts mp WHERE mp.part_number = it.part_number),0) AS stock
-			FROM invoice_items it
-			JOIN invoices i ON i.id = it.invoice_id
-			WHERE it.part_number <> ''
-			GROUP BY it.part_number
-
-			UNION ALL
-
-			SELECT mp.part_number, mp.description, 0, 0, 0, 0, NULL,
-			       mp.starting_stock - COALESCE((SELECT SUM(st.quantity) FROM stock_takes st WHERE st.part_number = mp.part_number),0)
-			FROM manual_parts mp
-			WHERE NOT EXISTS (SELECT 1 FROM invoice_items it2 WHERE it2.part_number = mp.part_number)
-		)
-		ORDER BY netto DESC`)
+		SELECT it.part_number,
+		       MAX(it.description),
+		       COUNT(1),
+		       COALESCE(SUM(it.quantity),0),
+		       COALESCE(SUM(it.netto),0),
+		       COUNT(DISTINCT COALESCE(NULLIF(it.vehicle_reg,''), i.vehicle_reg)),
+		       MAX(i.invoice_date)
+		FROM invoice_items it
+		JOIN invoices i ON i.id = it.invoice_id
+		WHERE it.part_number <> ''
+		GROUP BY it.part_number
+		ORDER BY SUM(it.netto) DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +414,7 @@ func (s *Store) Parts() ([]PartAgg, error) {
 	for rows.Next() {
 		var v PartAgg
 		var desc, last sql.NullString
-		if err := rows.Scan(&v.PartNumber, &desc, &v.Times, &v.Quantity, &v.Netto, &v.Vehicles, &last, &v.Stock); err != nil {
+		if err := rows.Scan(&v.PartNumber, &desc, &v.Times, &v.Quantity, &v.Netto, &v.Vehicles, &last); err != nil {
 			return nil, err
 		}
 		v.Desc, v.LastDate = desc.String, last.String
