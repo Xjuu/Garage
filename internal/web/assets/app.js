@@ -455,6 +455,35 @@ $('d-close').addEventListener('click', closeDrawer);
 $('scrim').addEventListener('click', closeDrawer);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
 
+// ── keyboard shortcuts ───────────────────────────────────────────────────
+// The handful of actions worth a key of their own: the two most-clicked
+// buttons in the topbar, and jumping straight to a top-level tab. Firing a
+// real click() on the actual button — rather than calling its handler
+// directly — means a shortcut is automatically a no-op exactly when the
+// button itself would be: disabled while a sync or upload is already
+// running, for instance, so nothing here needs to duplicate that state.
+const SHORTCUT_TABS = { '1': 'overview', '2': 'invoices', '3': 'spending', '4': 'fleet' };
+
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  // Never while typing, and never while a drawer or dialog already has the
+  // user's attention — jumping tabs out from under an open invoice or a
+  // half-filled form would lose more than it saves.
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+  if ($('drawer').classList.contains('open')) return;
+  if (!$('gen-modal').hidden || !$('files-modal').hidden) return;
+
+  if (SHORTCUT_TABS[e.key]) { e.preventDefault(); show(SHORTCUT_TABS[e.key]); return; }
+
+  switch (e.key.toLowerCase()) {
+    case 's': e.preventDefault(); $('btn-sync').click(); break;
+    case 'u': e.preventDefault(); $('btn-upload').click(); break;
+    case 'g': e.preventDefault(); $('btn-sheet').click(); break;
+  }
+});
+
 $('d-save').addEventListener('click', async () => {
   if (!state.current) return;
   const patch = {};

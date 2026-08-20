@@ -654,6 +654,39 @@ td.strong { font-weight: 700; }
   .omni-hint { display: none; }
 }
 
+/* Always visible for the same reason the search hint is: a shortcut nobody
+   discovers is not a feature, it's dead code with a keydown listener. Its
+   own row rather than squeezed into the already-full search bar, so it
+   never has to compete with the date fields for room and never needs a
+   scrollbar of its own. */
+.shortcuts-bar {
+  max-width: 1500px; margin: 0 auto;
+  padding: 0 var(--pad) 12px;
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+}
+.shortcuts-bar .chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px;
+  border-radius: 100px;
+  border: 1px solid var(--g3);
+  background: var(--g05);
+  font-size: 12px; color: var(--g5); font-weight: 600;
+  white-space: nowrap;
+}
+.shortcuts-bar .chip kbd {
+  display: inline-block; padding: 1px 7px; border-radius: 4px;
+  background: var(--ink); color: var(--paper);
+  font-family: var(--mono); font-size: 11.5px; font-weight: 800;
+  line-height: 17px;
+}
+
+/* Keyboard shortcuts have no audience on a touchscreen, so this is one of
+   the few things that simply disappears below the mobile breakpoint rather
+   than reflowing — there is no smaller version of "press a key" to show. */
+@media (max-width: 720px) {
+  .shortcuts-bar { display: none; }
+}
+
 
 /* Training form: value on the left, "where on the page" on the right, so the
    pairing is obvious rather than being two unrelated lists. */
