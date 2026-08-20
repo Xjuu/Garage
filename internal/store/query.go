@@ -387,6 +387,11 @@ type PartAgg struct {
 	Netto      float64 `json:"netto"`
 	Vehicles   int     `json:"vehicles"`
 	LastDate   string  `json:"last_date"`
+	// Stock is what's left on the shelf: everything ever invoiced for this
+	// part, minus everything the parts counter has logged as taken. There is
+	// no separate "receive stock" step — a part arrives the moment its
+	// invoice is stored — so this is the true running count, not an estimate.
+	Stock float64 `json:"stock"`
 }
 
 // Parts ranks part numbers by spend, and counts how many distinct vehicles
@@ -399,7 +404,10 @@ func (s *Store) Parts() ([]PartAgg, error) {
 		       COALESCE(SUM(it.quantity),0),
 		       COALESCE(SUM(it.netto),0),
 		       COUNT(DISTINCT COALESCE(NULLIF(it.vehicle_reg,''), i.vehicle_reg)),
-		       MAX(i.invoice_date)
+		       MAX(i.invoice_date),
+		       COALESCE(SUM(it.quantity),0) - COALESCE((
+		           SELECT SUM(st.quantity) FROM stock_takes st WHERE st.part_number = it.part_number
+		       ), 0)
 		FROM invoice_items it
 		JOIN invoices i ON i.id = it.invoice_id
 		WHERE it.part_number <> ''
@@ -414,7 +422,7 @@ func (s *Store) Parts() ([]PartAgg, error) {
 	for rows.Next() {
 		var v PartAgg
 		var desc, last sql.NullString
-		if err := rows.Scan(&v.PartNumber, &desc, &v.Times, &v.Quantity, &v.Netto, &v.Vehicles, &last); err != nil {
+		if err := rows.Scan(&v.PartNumber, &desc, &v.Times, &v.Quantity, &v.Netto, &v.Vehicles, &last, &v.Stock); err != nil {
 			return nil, err
 		}
 		v.Desc, v.LastDate = desc.String, last.String

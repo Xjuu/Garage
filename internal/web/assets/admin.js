@@ -274,4 +274,87 @@ $('show-totp-qr').addEventListener('click', async () => {
   btn.textContent = 'Show QR code';
 });
 
-Object.assign(viewLoaders, { admin: () => loadAdmin().then(loadLogs) });
+// ── parts counter admin ──────────────────────────────────────────────────
+
+function whenLocalShort(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return isNaN(d) ? esc(iso) : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadPartsAdmin() {
+  const [ips, devices, takes] = await Promise.all([
+    api('/api/admin/parts-ips'),
+    api('/api/admin/parts-devices'),
+    api('/api/admin/parts-takes'),
+  ]);
+
+  $('pi-rows').innerHTML = ips.length
+    ? ips.map((a) => `
+        <tr><td class="mono">${esc(a.ip)}</td><td>${dash(a.label)}</td>
+          <td class="mono">${whenLocalShort(a.created_at)}</td>
+          <td><button class="btn sm danger" data-ip="${esc(a.ip)}">Remove</button></td></tr>`).join('')
+    : '<tr><td colspan="4" class="empty">No addresses allowed yet — the parts site refuses everything</td></tr>';
+  $('pi-rows').querySelectorAll('button[data-ip]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      try {
+        await api('/api/admin/parts-ips?ip=' + encodeURIComponent(b.dataset.ip), { method: 'DELETE' });
+        loadPartsAdmin();
+      } catch (e) { toast(e.message, true); }
+    }));
+
+  $('pd-rows').innerHTML = devices.length
+    ? devices.map((d) => `
+        <tr><td class="mono truncate" title="${esc(d.label)}">${dash(d.label) || '<span class="muted">unknown device</span>'}</td>
+          <td class="mono">${whenLocalShort(d.first_seen)}</td>
+          <td class="mono">${whenLocalShort(d.last_seen)}</td>
+          <td>${d.active ? '<span class="pill">Active</span>' : '<span class="pill flag">Revoked</span>'}</td>
+          <td>${d.active ? `<button class="btn sm danger" data-id="${esc(d.id)}">Revoke</button>` : ''}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="empty">No device has signed in yet</td></tr>';
+  $('pd-rows').querySelectorAll('button[data-id]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      try {
+        await api('/api/admin/parts-devices/revoke', { method: 'POST', json: { id: b.dataset.id } });
+        loadPartsAdmin();
+      } catch (e) { toast(e.message, true); }
+    }));
+
+  $('pt-rows').innerHTML = takes.length
+    ? takes.map((t) => `
+        <tr><td class="mono">${whenLocalShort(t.taken_at)}</td>
+          <td><span class="part">${esc(t.part_number)}</span></td>
+          <td><span class="reg">${esc(t.vehicle_reg)}</span></td>
+          <td class="num">${int(t.quantity)}</td>
+          <td class="mono truncate">${dash(t.device_name)}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="empty">Nothing logged yet</td></tr>';
+}
+
+$('pi-add').addEventListener('click', async () => {
+  const ip = $('pi-ip').value.trim();
+  if (!ip) { $('pi-ip').focus(); return; }
+  try {
+    await api('/api/admin/parts-ips', { method: 'POST', json: { ip, label: $('pi-label').value.trim() } });
+    $('pi-ip').value = ''; $('pi-label').value = '';
+    toast('Address allowed');
+    loadPartsAdmin();
+  } catch (e) { toast(e.message, true); }
+});
+
+$('pp-save').addEventListener('click', async () => {
+  const pin = $('pp-pin').value.trim();
+  const result = $('pp-result');
+  result.innerHTML = '';
+  if (!/^\d{4,12}$/.test(pin)) {
+    result.innerHTML = '<span class="pill flag">4-12 digits only</span>';
+    return;
+  }
+  try {
+    const r = await api('/api/admin/parts-pin', { method: 'POST', json: { pin } });
+    result.innerHTML = `<span class="pill">Saved</span> <span style="margin-left:8px">${esc(r.message)}</span>`;
+    $('pp-pin').value = '';
+  } catch (e) {
+    result.innerHTML = `<span class="pill flag">Failed</span> <span style="margin-left:8px">${esc(e.message)}</span>`;
+  }
+});
+
+Object.assign(viewLoaders, { admin: () => loadAdmin().then(loadLogs).then(loadPartsAdmin) });

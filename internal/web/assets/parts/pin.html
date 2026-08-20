@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Parts counter — Sign in</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='black'/><text x='16' y='23' font-size='20' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>P</text></svg>">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="brand"><span class="brand-mark">P</span> Parts counter</div>
+    <p class="sub">Enter the 6-digit code to continue.</p>
+
+    <form id="form">
+      <div class="field">
+        <label for="code">Code</label>
+        <input type="text" id="code" inputmode="numeric" pattern="[0-9]*"
+               maxlength="6" autocomplete="off" autofocus required
+               placeholder="000000">
+      </div>
+      <button class="btn solid" type="submit" id="submit">Continue</button>
+      <div class="login-err" id="err" role="alert"></div>
+    </form>
+  </div>
+</div>
+<footer class="credit-login">Made by Filip Klonowski</footer>
+<script src="/static/parts/pin.js"></script>
+</body>
+</html>
