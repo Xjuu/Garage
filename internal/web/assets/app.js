@@ -275,14 +275,18 @@ async function loadInvoices() {
   $('page-prev').disabled = state.page <= 1;
   $('page-next').disabled = state.page * state.per >= data.total;
 
-  document.querySelectorAll('th.sortable').forEach((th) => {
+  // Scoped to the Invoices view specifically: the Fleet registry table has
+  // its own th.sortable headers with entirely separate state (see fleet.js),
+  // and an unscoped selector here would pick those up too and try to sort
+  // the invoice list on a click meant for the registry.
+  document.querySelectorAll('#view-invoices th.sortable').forEach((th) => {
     const on = th.dataset.sort === state.sort;
     th.classList.toggle('sorted', on);
     th.querySelector('.arrow').textContent = on && state.dir === 'asc' ? '↑' : '↓';
   });
 }
 
-document.querySelectorAll('th.sortable').forEach((th) =>
+document.querySelectorAll('#view-invoices th.sortable').forEach((th) =>
   th.addEventListener('click', () => {
     const col = th.dataset.sort;
     if (state.sort === col) {

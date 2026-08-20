@@ -240,7 +240,50 @@ async function loadFleet() {
   $('unassigned-rows').querySelectorAll('button.assign').forEach((b) =>
     b.addEventListener('click', () => assignVehicle(b.dataset.reg)));
 
-  const registry = await api('/api/registry');
+  registryData = await api('/api/registry');
+  renderRegistryTable();
+}
+
+// ── registry sorting ──────────────────────────────────────────────────────
+// Client-side: the whole registry is fetched in one call already, so
+// reordering it is free and instant rather than a round trip. Kept entirely
+// separate from the Invoices table's th.sortable handling in app.js — same
+// look, unrelated state, so a click here never touches the invoices list.
+
+let registryData = [];
+let registrySort = '';
+let registryDir = 'asc';
+
+const REGISTRY_COMPARE = {
+  make: (v) => (v.make || '').toLowerCase(),
+  model: (v) => (v.model || '').toLowerCase(),
+  driver: (v) => (v.driver || '').toLowerCase(),
+};
+
+function sortedRegistry() {
+  const key = REGISTRY_COMPARE[registrySort];
+  if (!key) return registryData; // default: whatever order the API sent
+
+  // Vehicles with nothing in the column sort to the end regardless of
+  // direction — an empty driver is not "before A" or "after Z", it is just
+  // not worth sorting on. Sorting the two halves separately, rather than
+  // sorting everything and reversing for "desc", is what keeps that true in
+  // both directions: reversing a fully-sorted array would put the empties
+  // that landed last in ascending order first in descending order instead.
+  const withValue = [];
+  const empty = [];
+  for (const v of registryData) (key(v) ? withValue : empty).push(v);
+
+  withValue.sort((a, b) => {
+    const av = key(a), bv = key(b);
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return registryDir === 'desc' ? -cmp : cmp;
+  });
+  return [...withValue, ...empty];
+}
+
+function renderRegistryTable() {
+  const registry = sortedRegistry();
   $('registry-rows').innerHTML = registry.length
     ? registry.map((v) => `
         <tr>
@@ -283,7 +326,25 @@ async function loadFleet() {
     b.addEventListener('click', () => assignVehicle(b.dataset.reg)));
   $('registry-rows').querySelectorAll('button.view').forEach((b) =>
     b.addEventListener('click', () => openVehicle(b.dataset.reg)));
+
+  document.querySelectorAll('#view-fleet th.sortable').forEach((th) => {
+    const on = th.dataset.sort === registrySort;
+    th.classList.toggle('sorted', on);
+    th.querySelector('.arrow').textContent = on && registryDir === 'desc' ? '↓' : '↑';
+  });
 }
+
+document.querySelectorAll('#view-fleet th.sortable').forEach((th) =>
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    if (registrySort === col) {
+      registryDir = registryDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      registrySort = col;
+      registryDir = 'asc';
+    }
+    renderRegistryTable();
+  }));
 
 /** Vehicle editor. Reuses the drawer rather than introducing a second
     modal pattern, so editing feels the same everywhere. */

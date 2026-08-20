@@ -406,8 +406,11 @@
 
     <div class="section-title">Registry</div>
     <div class="panel"><div class="table-scroll"><table>
-      <thead><tr><th>Vehicle</th><th>Company</th><th>Make</th><th>Model</th>
-        <th>Driver</th><th class="num">Gross</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Vehicle</th><th>Company</th>
+        <th class="sortable" data-sort="make">Make<span class="arrow">↓</span></th>
+        <th class="sortable" data-sort="model">Model<span class="arrow">↓</span></th>
+        <th class="sortable" data-sort="driver">Driver<span class="arrow">↓</span></th>
+        <th class="num">Gross</th><th>Status</th><th></th></tr></thead>
       <tbody id="registry-rows"></tbody></table></div></div>
   </section>
 
@@ -612,6 +615,13 @@
 
 <div class="toasts" id="toasts"></div>
 
+<div class="cookie-notice" id="cookie-notice" hidden>
+  <span><strong>This site uses required cookies</strong> — for signing in and
+    keeping your session secure. Nothing else: no tracking, no advertising.</span>
+  <button class="btn sm" id="cookie-notice-dismiss">Got it</button>
+</div>
+
+<script src="/static/cookie-notice.js"></script>
 <script src="/static/ping.js"></script>
 <script src="/static/caricon.js"></script>
 <script src="/static/chart.js"></script>

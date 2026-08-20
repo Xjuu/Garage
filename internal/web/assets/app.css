@@ -458,6 +458,20 @@ td.strong { font-weight: 700; }
 .toast.bad { background: var(--flag); }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 
+/* ── Cookie notice ──────────────────────────────────────────────────── */
+
+.cookie-notice {
+  position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 250;
+  max-width: 560px; margin: 0 auto;
+  background: var(--paper); border: 1px solid var(--g2);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 14px 16px; display: flex; align-items: center; gap: 14px;
+  font-size: 13px; line-height: 1.5; color: var(--g5);
+}
+.cookie-notice[hidden] { display: none; }
+.cookie-notice strong { color: var(--ink); }
+.cookie-notice .btn { flex-shrink: 0; }
+
 /* ── Login ──────────────────────────────────────────────────────────── */
 
 .login-wrap {
