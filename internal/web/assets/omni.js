@@ -190,9 +190,19 @@ omni.addEventListener('keydown', (e) => {
 // pressing Enter goes straight to that vehicle rather than to a filtered
 // list containing it.
 //
-// Falling back to the filtered invoice list only when there is no hit to open
-// — a date-only search, or a query that matched nothing — keeps that jump as
-// a genuine fallback rather than the default action.
+// A typed query that never turned into a hit is NOT carried over into the
+// Invoices search box as a fallback — it used to be, but that meant typing
+// something this search doesn't recognise, then pressing Return, silently
+// re-ran the exact same (already-known-empty) text as a search over there
+// too: a second empty result for a query this box had already said matched
+// nothing. The only sanctioned link between the top search and Invoices is
+// choosing a vehicle and then explicitly asking to see its invoices (the
+// "Show invoices" toast on the vehicle page) — never an unselected, raw
+// query silently reappearing in a different search box.
+//
+// A pure date range with nothing typed is the one case still worth falling
+// back to Invoices for: there is no text being carried across to correlate
+// the two searches, and dates scope the invoice list directly.
 omni.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeOmni(); omni.blur(); return; }
   if (e.key !== 'Enter') return;
@@ -215,14 +225,16 @@ omni.addEventListener('keydown', (e) => {
   const { q, from, to } = omniQuery();
 
   // Nothing was actually searched — an empty bar with no date range — so
-  // there is nothing to fall back to. Pressing Return here (most often right
-  // after the "Return focuses search" shortcut put the cursor here with
-  // nothing typed yet) must do nothing, not silently jump to the unfiltered
-  // Invoices tab.
+  // there is nothing to fall back to.
   if (!q && !from && !to) return;
 
-  state.filters = { q, from, to, supplier: '', reg: '', review: '' };
-  $('f-q').value = q;
+  // Something was typed but never matched a hit: leave it exactly as it
+  // is — the dropdown already says "Nothing matches that" — rather than
+  // re-running it as an Invoices search too.
+  if (q) return;
+
+  state.filters = { q: '', from, to, supplier: '', reg: '', review: '' };
+  $('f-q').value = '';
   $('f-from').value = from;
   $('f-to').value = to;
   ['f-supplier', 'f-reg', 'f-review'].forEach((id) => { $(id).value = ''; });

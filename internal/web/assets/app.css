@@ -694,6 +694,17 @@ td.strong { font-weight: 700; }
   line-height: 17px;
 }
 
+/* section-shortcuts is a plain inline container, not a chip itself — it just
+   holds whichever chips renderSectionShortcuts() injects, laid out in the
+   same flex-wrap flow as everything else in the bar. A thin rule marks them
+   as belonging to the current section specifically, but only once there is
+   something to mark — an empty container (Overview, Invoices) gets no
+   leftover divider floating on its own. */
+.section-shortcuts:not(:empty) {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding-left: 8px; border-left: 1px solid var(--g2);
+}
+
 /* Keyboard shortcuts have no audience on a touchscreen, so this is one of
    the few things that simply disappears below the mobile breakpoint rather
    than reflowing — there is no smaller version of "press a key" to show. */

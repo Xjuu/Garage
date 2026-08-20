@@ -213,6 +213,7 @@ function show(view) {
 
   document.querySelectorAll('.view').forEach((s) =>
     s.classList.toggle('active', s.id === 'view-' + view));
+  renderSectionShortcuts(view);
   loadView(view);
 }
 
@@ -553,7 +554,58 @@ document.addEventListener('keydown', (e) => {
 // directly — means a shortcut is automatically a no-op exactly when the
 // button itself would be: disabled while a sync or upload is already
 // running, for instance, so nothing here needs to duplicate that state.
-const SHORTCUT_TABS = { '1': 'overview', '2': 'invoices', '3': 'spending', '4': 'fleet' };
+//
+// 1-4 match the four tabs in the exact order they appear on screen — the
+// same landing view a click on that tab uses (Analysis lands on Spending,
+// Setup on Fleet, because that's what clicking the tab itself already does;
+// a keyboard shortcut that behaved differently from the mouse would be its
+// own kind of confusing).
+const TOP_SHORTCUTS = [
+  ['1', 'overview', 'Overview'],
+  ['2', 'invoices', 'Invoices'],
+  ['3', 'spending', 'Analysis'],
+  ['4', 'fleet', 'Setup'],
+];
+const TOP_SHORTCUT_KEYS = Object.fromEntries(TOP_SHORTCUTS.map(([k, view]) => [k, view]));
+
+// Once inside Analysis or Setup, its subtabs get their own first-letter
+// shortcut — but only while a view from that group is actually on screen,
+// and only for the groups that have subtabs to jump between at all.
+//
+// Two letters collide within Analysis (Spending/Suppliers both start with
+// S; Vehicles/VAT both start with V). The more central one keeps the plain
+// first letter — Spending because it's the group's own default landing
+// view, Vehicles because fleet costs are what the rest of the app is
+// built around — and the other takes its second letter instead
+// (sUppliers, vAt), which stays legible without inventing an arbitrary key.
+//
+// Inside these two groups this also shadows the global Sync (S) and
+// Upload (U) shortcuts — a deliberate trade a wider dashboard might not
+// make, but both buttons stay one click away in the topbar regardless,
+// and the shadowing only applies while actually looking at that group.
+const SECTION_SHORTCUTS = {
+  analysis: [
+    ['s', 'spending', 'Spending'],
+    ['v', 'vehicles', 'Vehicles'],
+    ['p', 'parts', 'Parts'],
+    ['u', 'suppliers', 'Suppliers'],
+    ['a', 'vat', 'VAT'],
+  ],
+  setup: [
+    ['f', 'fleet', 'Fleet'],
+    ['t', 'training', 'Training'],
+    ['a', 'admin', 'Admin'],
+  ],
+};
+
+/** Redraws the contextual part of the shortcuts bar to match whichever
+    section (if any) `view` belongs to — called from show() so it can never
+    drift out of sync with what Escape/1-4/clicking a tab actually land on. */
+function renderSectionShortcuts(view) {
+  const items = SECTION_SHORTCUTS[groupOf[view]];
+  $('section-shortcuts').innerHTML = (items || [])
+    .map(([k, , label]) => `<span class="chip"><kbd>${esc(k.toUpperCase())}</kbd> ${esc(label)}</span>`).join('');
+}
 
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -566,9 +618,17 @@ document.addEventListener('keydown', (e) => {
   if ($('drawer').classList.contains('open')) return;
   if (!$('gen-modal').hidden || !$('files-modal').hidden) return;
 
-  if (SHORTCUT_TABS[e.key]) { e.preventDefault(); show(SHORTCUT_TABS[e.key]); return; }
+  if (TOP_SHORTCUT_KEYS[e.key]) { e.preventDefault(); show(TOP_SHORTCUT_KEYS[e.key]); return; }
 
-  switch (e.key.toLowerCase()) {
+  // Section shortcuts are checked, and take priority, before the global
+  // action keys below — see the comment on SECTION_SHORTCUTS for why S and
+  // U are deliberately shadowed while inside Analysis.
+  const key = e.key.toLowerCase();
+  const section = SECTION_SHORTCUTS[groupOf[state.view]];
+  const hit = section?.find(([k]) => k === key);
+  if (hit) { e.preventDefault(); show(hit[1]); return; }
+
+  switch (key) {
     case 's': e.preventDefault(); $('btn-sync').click(); break;
     case 'u': e.preventDefault(); $('btn-upload').click(); break;
     case 'g': e.preventDefault(); $('btn-sheet').click(); break;
@@ -876,7 +936,16 @@ function renderThisMonth(m) {
 async function refreshCounts() {
   // loadRecentFiles lives in exports.js and also sets the badge, so this is a
   // single request rather than two for the same data.
-  await loadRecentFiles();
+  //
+  // Parts has no equivalent: unlike vehicles and suppliers, whose counts ride
+  // along in the Overview response that already loads on every boot, nothing
+  // else ever asks for the parts list — so its badge sat on a stale "0" until
+  // the Parts tab was actually opened once. Fetched here as its own small
+  // request specifically to fill that gap.
+  await Promise.all([
+    loadRecentFiles(),
+    api('/api/parts').then((rows) => { $('c-parts').textContent = int(rows.length); }),
+  ]);
 }
 
 // ── boot ──────────────────────────────────────────────────────────────────

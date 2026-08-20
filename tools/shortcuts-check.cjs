@@ -225,6 +225,43 @@ press('Escape');
 check('Escape does not go back while the search dropdown is open', shown.length === 0);
 store['omni-results'].hidden = true;
 
+// 9. Section shortcuts: once inside Analysis (pressing '3' lands on
+//    Spending), its own subtabs get first-letter keys — including S and U,
+//    which deliberately shadow the global Sync/Upload shortcuts while
+//    actually looking at this section. Two real collisions get resolved the
+//    same way every time: the more central subtab keeps the plain letter
+//    (Spending over Suppliers, Vehicles over VAT), the other takes its
+//    second letter.
+press('3'); // into Analysis, landing on Spending
+check('the shortcuts bar actually shows the Analysis subtab chips',
+  ['Spending', 'Vehicles', 'Parts', 'Suppliers', 'VAT'].every((label) => store['section-shortcuts'].innerHTML.includes(label)));
+for (const [key, view] of [['s', 'spending'], ['v', 'vehicles'], ['p', 'parts'], ['u', 'suppliers'], ['a', 'vat']]) {
+  shown.length = 0; clicks.length = 0;
+  press(key);
+  check(`inside Analysis, "${key}" goes to ${view}`, shown[0] === view);
+}
+check('"u" went to Suppliers, not Upload — the shadowing actually applies', clicks.length === 0);
+
+// 10. Setup has no letter collisions, so this is really just confirming the
+//     group-scoping picks the right table at all, not Analysis's leftover
+//     one.
+press('4'); // into Setup, landing on Fleet
+for (const [key, view] of [['t', 'training'], ['a', 'admin'], ['f', 'fleet']]) {
+  shown.length = 0;
+  press(key);
+  check(`inside Setup, "${key}" goes to ${view}`, shown[0] === view);
+}
+
+// 11. Outside Analysis and Setup, S and U must still mean Sync and Upload —
+//     the shadowing is scoped to the section it belongs to, not global.
+press('1'); // back to Overview, which has no subtabs at all
+check('the section chips are gone on Overview, which has nothing to show there',
+  store['section-shortcuts'].innerHTML === '');
+clicks.length = 0; shown.length = 0;
+press('s');
+check('on Overview, "s" clicks Sync again (no shadowing outside Analysis)',
+  clicks.includes('btn-sync') && shown.length === 0);
+
 if (failed) {
   console.log(`\n${failed} check(s) failed.`);
   process.exit(1);

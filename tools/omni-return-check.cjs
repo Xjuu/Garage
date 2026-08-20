@@ -249,16 +249,24 @@ check('first Return (nothing focused) reaches the search bar', activeElement ===
 dispatchKeydown(omniEl, 'Enter'); // 2nd Return: bar is focused but still empty
 check('second Return on a still-empty bar does not navigate anywhere', shown.length === 0);
 
-// 8. The two cases the fallback exists FOR must still work: a query that
-//    matched nothing, and a date-only search with no query at all. Scenario
-//    7 must not have thrown these out along with the empty-bar case.
+// 8. A typed query that matched nothing must NOT fall back to Invoices —
+//    the top search and the Invoices search box are related in exactly one
+//    way (choosing a vehicle, then explicitly asking for its invoices), and
+//    silently re-running an already-known-empty query as a second, unrelated
+//    search used to be the opposite of that: a raw, unselected query
+//    reappearing in a different box on its own.
 omniEl.focus();
 omniEl.value = 'no such plate';
 ctx.renderOmni({ total: 0, vehicles: [], parts: [], suppliers: [], invoices: [] });
 shown.length = 0;
 dispatchKeydown(omniEl, 'Enter');
-check('a query that matched nothing still falls back to the Invoices tab', shown[0] === 'invoices');
+check('a query that matched nothing does not fall back to Invoices', shown.length === 0);
+check('the unmatched query is left exactly as typed, not cleared', omniEl.value === 'no such plate');
 
+// 9. A pure date range, with nothing typed, is still worth falling back to
+//    Invoices for — no text is being carried across, so there is nothing to
+//    correlate between the two searches, and dates scope the invoice list
+//    directly.
 omniEl.focus();
 omniEl.value = '';
 store['omni-from'].value = '2026-08-01';
@@ -268,7 +276,7 @@ dispatchKeydown(omniEl, 'Enter');
 check('a date-only search still falls back to the Invoices tab', shown[0] === 'invoices');
 store['omni-from'].value = '';
 
-// 9. A plain page button holding focus — wherever the mouse left it after
+// 10. A plain page button holding focus — wherever the mouse left it after
 //    the last click, not something the user is about to press Return on
 //    again — must not block Return from reaching search. This is the
 //    reported bug: Return "sometimes doesn't register", which was every
@@ -278,7 +286,7 @@ activeElement = clearBtn;
 dispatchKeydown({ _listeners: {} }, 'Enter');
 check('Return still reaches search through a plain focused button', activeElement === omniEl);
 
-// 9b. Inside the open drawer, a button is a real form action — "Save
+// 10b. Inside the open drawer, a button is a real form action — "Save
 //     changes", "Mark reviewed" — and Return has to activate it, the way
 //     it would for any other on-screen form.
 activeElement = clearBtn;
@@ -288,14 +296,14 @@ check('Return still activates a button inside the open drawer', activeElement ==
 clearBtn._inOpenDrawer = false;
 activeElement = bodyEl;
 
-// 10. Return must not reach a search bar hidden behind an open dialog.
+// 11. Return must not reach a search bar hidden behind an open dialog.
 activeElement = bodyEl;
 store['gen-modal'].hidden = false;
 dispatchKeydown({ _listeners: {} }, 'Enter');
 check('Return is ignored while a modal dialog is open', activeElement === bodyEl);
 store['gen-modal'].hidden = true;
 
-// 11. "/" is unrelated to this change and must still work exactly as
+// 12. "/" is unrelated to this change and must still work exactly as
 //     before, including through a focused button — its guard was
 //     intentionally left untouched.
 activeElement = clearBtn;
