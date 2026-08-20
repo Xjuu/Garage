@@ -43,9 +43,18 @@ type Server struct {
 	jobs    *jobs.Runner
 	exports *export.Catalogue
 	sched   *scheduler
+	logs    *logBuffer
 }
 
 func New(cfg *config.Config, db *store.Store) (*Server, error) {
+	// A ring buffer alongside stderr, so the Admin page can show the
+	// last few hundred lines the server has logged (scheduled syncs,
+	// failures, startup) without needing SSH access to read the
+	// journal. Temporary: a real log viewer would page through the
+	// journal itself; this is the quick version.
+	logs := newLogBuffer(500)
+	log.SetOutput(io.MultiWriter(os.Stderr, logs))
+
 	a, err := auth.New(cfg.PasswordHash, cfg.SessionKeyPath(), cfg.CookieSecure)
 	if err != nil {
 		return nil, err
@@ -67,6 +76,7 @@ func New(cfg *config.Config, db *store.Store) (*Server, error) {
 	return &Server{
 		cfg: cfg, db: db, auth: a, jobs: jobs.New(),
 		exports: export.NewCatalogue(cfg.ExportsDir()),
+		logs:    logs,
 	}, nil
 }
 

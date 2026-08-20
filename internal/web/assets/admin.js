@@ -223,4 +223,29 @@ $('vacuum-db').addEventListener('click', async () => {
   b.disabled = false; b.textContent = 'Compact database';
 });
 
-Object.assign(viewLoaders, { admin: loadAdmin });
+// ── server log (temporary) ───────────────────────────────────────────────
+// A quick way to see what the server has been doing without SSH access.
+// Polls only while the Admin tab is on screen, and only scrolls the box
+// down automatically when it was already scrolled to the bottom — so
+// reading back through older lines is not fought by the next refresh.
+
+const LOG_EVERY = 4000;
+
+async function loadLogs() {
+  const box = $('log-lines');
+  if (!box) return;
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 12;
+  try {
+    const { lines } = await api('/api/admin/logs');
+    box.innerHTML = (lines || []).map((l) =>
+      `<div${/ALERT/.test(l) ? ' class="err"' : ''}>${esc(l)}</div>`).join('')
+      || '<div style="color:var(--g4)">Nothing logged yet.</div>';
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  } catch (e) {
+    box.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }
+}
+
+setInterval(() => { if (state.view === 'admin') loadLogs(); }, LOG_EVERY);
+
+Object.assign(viewLoaders, { admin: () => loadAdmin().then(loadLogs) });

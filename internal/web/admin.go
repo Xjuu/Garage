@@ -28,6 +28,15 @@ func (s *Server) routesAdmin(api *http.ServeMux) {
 	api.HandleFunc("POST /api/admin/backup-now", s.json(s.backupNow))
 	api.HandleFunc("POST /api/admin/vacuum", s.json(s.vacuum))
 	api.HandleFunc("GET /api/admin/backup", s.backup)
+	api.HandleFunc("GET /api/admin/logs", s.json(s.recentLogs))
+}
+
+// recentLogs backs the temporary "Server log" panel on the Admin page: the
+// last few hundred lines this process has logged, oldest first, so a
+// scheduled sync or a failure can be seen from the dashboard without SSH
+// access to the machine it runs on.
+func (s *Server) recentLogs(r *http.Request) (any, error) {
+	return map[string]any{"lines": s.logs.Lines()}, nil
 }
 
 // adminStatus is `goldstar doctor` rendered for the browser. Secrets are

@@ -526,11 +526,22 @@
     </div>
 
     <div class="section-title">Data</div>
-    <div class="panel" style="padding:16px 18px">
+    <div class="panel" style="padding:16px 18px;margin-bottom:18px">
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn" id="backup-db">Download backup</button>
         <button class="btn" id="vacuum-db">Compact database</button>
       </div>
+    </div>
+
+    <!-- TEMP: a quick way to see what the server has been doing without SSH
+         access. Remove this section, its loadLogs()/setInterval in admin.js
+         and the GET /api/admin/logs route once it is no longer needed. -->
+    <div class="section-title">Server log</div>
+    <div class="panel" style="padding:16px 18px 0">
+      <div class="m" style="color:var(--g4);font-size:12px;margin-bottom:10px">
+        Last 500 lines this process has logged, newest at the bottom.
+      </div>
+      <pre class="console-log" id="log-lines" style="max-height:280px;color:var(--g5);padding:0 0 14px"></pre>
     </div>
   </section>
 </main>
