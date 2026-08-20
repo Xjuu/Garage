@@ -143,6 +143,7 @@ function renderVehicleSpec(v, lastTimingBelt, hasTimingBelt) {
     ['Cylinder capacity', v.cylinder_capacity],
     ['Fuel type', v.fuel_type],
     ['Engine size', v.engine_size],
+    ['Engine number', v.engine_number],
     ['Tyre size', v.tyre_size],
     ['Radio code', v.radio_code],
     ['Spare keys', v.spare_keys],

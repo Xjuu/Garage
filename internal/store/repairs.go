@@ -26,6 +26,7 @@ type Repair struct {
 	SpareKeys         string  `json:"spare_keys"`
 	FuelType          string  `json:"fuel_type"`
 	EngineSize        string  `json:"engine_size"`
+	EngineNumber      string  `json:"engine_number"`
 	TyreSize          string  `json:"tyre_size"`
 	RadioCode         string  `json:"radio_code"`
 	OilAmount         string  `json:"oil_amount"`
@@ -40,6 +41,12 @@ var serviceTypes = map[string]bool{"full": true, "mini": true, "other": true}
 // carries (make, model, VIN, colour, ...) into the vehicle's registry row,
 // so the latest known spec is visible everywhere else in the dashboard too,
 // not just buried in this one visit's record.
+//
+// r.ServiceDate is normally left empty by the worker app — this is "log
+// what happened today" — and defaults to right now. The historical import
+// is the one caller that sets it explicitly, since backfilling years of
+// visits as though they all happened on import day would make every
+// "last serviced" and "last timing belt" reading on the dashboard wrong.
 func (s *Store) LogRepair(r Repair, deviceID string) (int64, error) {
 	reg := NormalizeReg(r.VehicleReg)
 	if reg == "" {
@@ -55,6 +62,10 @@ func (s *Store) LogRepair(r Repair, deviceID string) (int64, error) {
 	if r.ServiceType != "other" {
 		r.ServiceTypeOther = ""
 	}
+	serviceDate := strings.TrimSpace(r.ServiceDate)
+	if serviceDate == "" {
+		serviceDate = now()
+	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -66,15 +77,15 @@ func (s *Store) LogRepair(r Repair, deviceID string) (int64, error) {
 		INSERT INTO repairs (
 			vehicle_reg, service_date, service_type, service_type_other, mileage,
 			timing_belt_changed, description, vin, make, model, colour,
-			cylinder_capacity, spare_keys, fuel_type, engine_size, tyre_size,
+			cylinder_capacity, spare_keys, fuel_type, engine_size, engine_number, tyre_size,
 			radio_code, oil_amount, device_id, created_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		reg, now(), r.ServiceType, r.ServiceTypeOther, r.Mileage,
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		reg, serviceDate, r.ServiceType, r.ServiceTypeOther, r.Mileage,
 		boolToInt(r.TimingBeltChanged), strings.TrimSpace(r.Description),
 		strings.TrimSpace(r.VIN), strings.TrimSpace(r.Make), strings.TrimSpace(r.Model),
 		strings.TrimSpace(r.Colour), strings.TrimSpace(r.CylinderCapacity),
 		strings.TrimSpace(r.SpareKeys), strings.TrimSpace(r.FuelType),
-		strings.TrimSpace(r.EngineSize), strings.TrimSpace(r.TyreSize),
+		strings.TrimSpace(r.EngineSize), strings.TrimSpace(r.EngineNumber), strings.TrimSpace(r.TyreSize),
 		strings.TrimSpace(r.RadioCode), strings.TrimSpace(r.OilAmount),
 		deviceID, now())
 	if err != nil {
@@ -91,7 +102,7 @@ func (s *Store) LogRepair(r Repair, deviceID string) (int64, error) {
 	if err := updateVehicleSpecTx(tx, reg, VehicleSpecPatch{
 		Make: r.Make, Model: r.Model, VIN: r.VIN, Colour: r.Colour,
 		CylinderCapacity: r.CylinderCapacity, FuelType: r.FuelType,
-		EngineSize: r.EngineSize, TyreSize: r.TyreSize,
+		EngineSize: r.EngineSize, EngineNumber: r.EngineNumber, TyreSize: r.TyreSize,
 		RadioCode: r.RadioCode, SpareKeys: r.SpareKeys,
 	}); err != nil {
 		return 0, fmt.Errorf("update vehicle spec: %w", err)
@@ -108,7 +119,7 @@ func (s *Store) ListRepairsForVehicle(reg string) ([]Repair, error) {
 	rows, err := s.db.Query(`
 		SELECT r.id, r.vehicle_reg, r.service_date, r.service_type, r.service_type_other,
 		       r.mileage, r.timing_belt_changed, r.description, r.vin, r.make, r.model,
-		       r.colour, r.cylinder_capacity, r.spare_keys, r.fuel_type, r.engine_size,
+		       r.colour, r.cylinder_capacity, r.spare_keys, r.fuel_type, r.engine_size, r.engine_number,
 		       r.tyre_size, r.radio_code, r.oil_amount, r.device_id,
 		       COALESCE(rd.label, ''), r.created_at
 		FROM repairs r
@@ -130,7 +141,7 @@ func (s *Store) RecentRepairs(limit int) ([]Repair, error) {
 	rows, err := s.db.Query(`
 		SELECT r.id, r.vehicle_reg, r.service_date, r.service_type, r.service_type_other,
 		       r.mileage, r.timing_belt_changed, r.description, r.vin, r.make, r.model,
-		       r.colour, r.cylinder_capacity, r.spare_keys, r.fuel_type, r.engine_size,
+		       r.colour, r.cylinder_capacity, r.spare_keys, r.fuel_type, r.engine_size, r.engine_number,
 		       r.tyre_size, r.radio_code, r.oil_amount, r.device_id,
 		       COALESCE(rd.label, ''), r.created_at
 		FROM repairs r
@@ -150,7 +161,7 @@ func scanRepairs(rows *sql.Rows) ([]Repair, error) {
 		var beltChanged int
 		if err := rows.Scan(&r.ID, &r.VehicleReg, &r.ServiceDate, &r.ServiceType, &r.ServiceTypeOther,
 			&r.Mileage, &beltChanged, &r.Description, &r.VIN, &r.Make, &r.Model,
-			&r.Colour, &r.CylinderCapacity, &r.SpareKeys, &r.FuelType, &r.EngineSize,
+			&r.Colour, &r.CylinderCapacity, &r.SpareKeys, &r.FuelType, &r.EngineSize, &r.EngineNumber,
 			&r.TyreSize, &r.RadioCode, &r.OilAmount, &r.DeviceID, &r.DeviceName, &r.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -214,7 +225,7 @@ func (s *Store) SearchRepairVehicles(q string, limit int) ([]string, error) {
 type VehicleSpecPatch struct {
 	Make, Model, VIN, Colour                         string
 	CylinderCapacity, FuelType, EngineSize, TyreSize string
-	RadioCode, SpareKeys                             string
+	RadioCode, SpareKeys, EngineNumber               string
 }
 
 // UpdateVehicleSpec applies a partial spec update, registering the vehicle
@@ -255,6 +266,7 @@ func updateVehicleSpecTx(tx *sql.Tx, reg string, p VehicleSpecPatch) error {
 	add("cylinder_capacity", p.CylinderCapacity)
 	add("fuel_type", p.FuelType)
 	add("engine_size", p.EngineSize)
+	add("engine_number", p.EngineNumber)
 	add("tyre_size", p.TyreSize)
 	add("radio_code", p.RadioCode)
 	add("spare_keys", p.SpareKeys)

@@ -41,6 +41,9 @@ Usage:
   goldstar fleet-import F  Load a vehicle export (Callsign,Make,Model,Registration)
                      into the registry. Shows what it would do; add --apply to write.
                      --company "NAME" assigns every vehicle to that company.
+  goldstar repairs-import F  Load a "Goldstar Service Record"-style workbook (one
+                     sheet per vehicle) into the repairs log. Shows what it would
+                     do; add --apply to write.
   goldstar examples  Scan the examples folder for new reference invoices
   goldstar eval      Re-extract every completed example and score the accuracy
   goldstar serve     Serve the dashboard (default 127.0.0.1:8787)
@@ -153,6 +156,21 @@ func realMain(cmd string) error {
 		rep, err := pipeline.ImportFleetCSV(db, os.Args[2], company, apply, logf)
 		if rep != nil {
 			printFleetReport(rep)
+		}
+		return err
+	case "repairs-import":
+		if len(os.Args) < 3 {
+			return fmt.Errorf("usage: goldstar repairs-import <workbook.xlsx> [--apply]")
+		}
+		apply := false
+		for i := 3; i < len(os.Args); i++ {
+			if os.Args[i] == "--apply" {
+				apply = true
+			}
+		}
+		rep, err := pipeline.ImportRepairsXLSX(db, os.Args[2], apply, logf)
+		if rep != nil {
+			printRepairsReport(rep)
 		}
 		return err
 	case "backup":
@@ -366,5 +384,27 @@ func printFleetReport(r *pipeline.FleetReport) {
 	section("Same plate, several callsigns", r.Duplicates)
 	section("Worth checking", r.Odd)
 	section("Invoiced but missing from this export", r.Unlisted)
+	fmt.Println()
+}
+
+// printRepairsReport mirrors printFleetReport's shape: every skipped row is
+// listed by name, not just counted, since each one is a real service visit
+// that otherwise silently goes missing from the vehicle's history.
+func printRepairsReport(r *pipeline.RepairsReport) {
+	mode := "DRY RUN — nothing written"
+	if r.Applied {
+		mode = "applied"
+	}
+	fmt.Printf("\n  %d sheet(s) read, %d skipped (blank templates), %d vehicle(s)  [%s]\n",
+		r.Sheets, r.SheetsSkipped, r.Vehicles, mode)
+	fmt.Printf("  %d service row(s) + %d timing-belt row(s) found, %d imported\n",
+		r.MainRows, r.BeltRows, r.Imported)
+
+	if len(r.Skipped) > 0 {
+		fmt.Printf("\n  Skipped (%d)\n", len(r.Skipped))
+		for _, l := range r.Skipped {
+			fmt.Printf("    %s\n", l)
+		}
+	}
 	fmt.Println()
 }

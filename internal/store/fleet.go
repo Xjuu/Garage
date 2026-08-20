@@ -202,6 +202,7 @@ type Vehicle struct {
 	CylinderCapacity string `json:"cylinder_capacity"`
 	FuelType         string `json:"fuel_type"`
 	EngineSize       string `json:"engine_size"`
+	EngineNumber     string `json:"engine_number"`
 	TyreSize         string `json:"tyre_size"`
 	RadioCode        string `json:"radio_code"`
 	SpareKeys        string `json:"spare_keys"`
@@ -213,7 +214,7 @@ const vehicleSelect = `
 	       COUNT(i.id),
 	       COALESCE(SUM(i.netto),0), COALESCE(SUM(i.vat_amount),0), COALESCE(SUM(i.brutto),0),
 	       COALESCE(MIN(NULLIF(i.invoice_date,'')),''), COALESCE(MAX(NULLIF(i.invoice_date,'')),''),
-	       v.vin, v.colour, v.cylinder_capacity, v.fuel_type, v.engine_size, v.tyre_size,
+	       v.vin, v.colour, v.cylinder_capacity, v.fuel_type, v.engine_size, v.engine_number, v.tyre_size,
 	       v.radio_code, v.spare_keys
 	FROM vehicles v
 	LEFT JOIN companies c ON c.id = v.company_id
@@ -226,7 +227,7 @@ func scanVehicle(sc scanner) (*Vehicle, error) {
 	if err := sc.Scan(&v.Registration, &companyID, &v.CompanyName, &v.Make, &v.Model,
 		&v.Year, &v.Driver, &v.Notes, &active, &v.Invoices,
 		&v.Netto, &v.VAT, &v.Brutto, &v.FirstSeen, &v.LastSeen,
-		&v.VIN, &v.Colour, &v.CylinderCapacity, &v.FuelType, &v.EngineSize, &v.TyreSize,
+		&v.VIN, &v.Colour, &v.CylinderCapacity, &v.FuelType, &v.EngineSize, &v.EngineNumber, &v.TyreSize,
 		&v.RadioCode, &v.SpareKeys); err != nil {
 		return nil, err
 	}

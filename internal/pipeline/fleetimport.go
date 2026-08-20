@@ -69,9 +69,23 @@ func titleCase(s string) string {
 		if len(w) <= 3 && w == strings.ToUpper(w) {
 			continue // GTE, CHR, TX4 and similar
 		}
-		fields[i] = strings.ToUpper(w[:1]) + strings.ToLower(w[1:])
+		fields[i] = titleWord(w)
 	}
 	return strings.Join(fields, " ")
+}
+
+// titleWord title-cases one word, capitalising after an internal hyphen too
+// ("T-PORTER" -> "T-Porter") — plain "capitalise the first letter" alone
+// would leave a hyphenated model name half-shouted.
+func titleWord(w string) string {
+	parts := strings.Split(w, "-")
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + strings.ToLower(p[1:])
+	}
+	return strings.Join(parts, "-")
 }
 
 // ImportFleetCSV loads an Autocab-style vehicle export into the registry.

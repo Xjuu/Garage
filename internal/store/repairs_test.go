@@ -1,6 +1,10 @@
 package store
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestLogRepairRequiresRegistrationAndServiceType(t *testing.T) {
 	db := open(t)
@@ -19,6 +23,30 @@ func TestLogRepairRequiresRegistrationAndServiceType(t *testing.T) {
 				t.Errorf("LogRepair(%+v) should have been rejected", c.r)
 			}
 		})
+	}
+}
+
+// The worker app never sends a service_date — every visit it logs happened
+// today. LogRepair must fall back to now() for that case but respect an
+// explicit historical date when one is given, since that's the only way a
+// backfilled import can put a 2019 visit on the vehicle's actual timeline
+// instead of on the day it was imported.
+func TestLogRepairDefaultsDateButRespectsAnExplicitOne(t *testing.T) {
+	db := open(t)
+	if _, err := db.LogRepair(Repair{VehicleReg: "AB12CDE", ServiceType: "full"}, "device-1"); err != nil {
+		t.Fatalf("LogRepair: %v", err)
+	}
+	got, _ := db.ListRepairsForVehicle("AB12CDE")
+	if len(got) != 1 || !strings.HasPrefix(got[0].ServiceDate, time.Now().UTC().Format("2006-01-02")) {
+		t.Fatalf("ServiceDate = %q, want it to default to today", got[0].ServiceDate)
+	}
+
+	if _, err := db.LogRepair(Repair{VehicleReg: "AB12CDE", ServiceType: "full", ServiceDate: "2019-03-14"}, "device-1"); err != nil {
+		t.Fatalf("LogRepair with an explicit date: %v", err)
+	}
+	got, _ = db.ListRepairsForVehicle("AB12CDE")
+	if got[0].ServiceDate != "2019-03-14" {
+		t.Fatalf("ServiceDate = %q, want the historical date to be respected verbatim", got[0].ServiceDate)
 	}
 }
 

@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
   cylinder_capacity TEXT NOT NULL DEFAULT '',
   fuel_type         TEXT NOT NULL DEFAULT '',
   engine_size       TEXT NOT NULL DEFAULT '',
+  engine_number     TEXT NOT NULL DEFAULT '',
   tyre_size         TEXT NOT NULL DEFAULT '',
   radio_code        TEXT NOT NULL DEFAULT '',
   spare_keys        TEXT NOT NULL DEFAULT '',
@@ -197,6 +198,7 @@ CREATE TABLE IF NOT EXISTS repairs (
   spare_keys          TEXT NOT NULL DEFAULT '',
   fuel_type           TEXT NOT NULL DEFAULT '',
   engine_size         TEXT NOT NULL DEFAULT '',
+  engine_number       TEXT NOT NULL DEFAULT '',
   tyre_size           TEXT NOT NULL DEFAULT '',
   radio_code          TEXT NOT NULL DEFAULT '',
   oil_amount          TEXT NOT NULL DEFAULT '',
@@ -318,9 +320,13 @@ func migrate(db *sql.DB) error {
 			"cylinder_capacity": "ALTER TABLE vehicles ADD COLUMN cylinder_capacity TEXT NOT NULL DEFAULT ''",
 			"fuel_type":         "ALTER TABLE vehicles ADD COLUMN fuel_type TEXT NOT NULL DEFAULT ''",
 			"engine_size":       "ALTER TABLE vehicles ADD COLUMN engine_size TEXT NOT NULL DEFAULT ''",
+			"engine_number":     "ALTER TABLE vehicles ADD COLUMN engine_number TEXT NOT NULL DEFAULT ''",
 			"tyre_size":         "ALTER TABLE vehicles ADD COLUMN tyre_size TEXT NOT NULL DEFAULT ''",
 			"radio_code":        "ALTER TABLE vehicles ADD COLUMN radio_code TEXT NOT NULL DEFAULT ''",
 			"spare_keys":        "ALTER TABLE vehicles ADD COLUMN spare_keys TEXT NOT NULL DEFAULT ''",
+		},
+		"repairs": {
+			"engine_number": "ALTER TABLE repairs ADD COLUMN engine_number TEXT NOT NULL DEFAULT ''",
 		},
 	}
 	for table, added := range tables {

@@ -225,6 +225,7 @@ $('form').addEventListener('submit', async (e) => {
         spare_keys: $('spare-keys').value.trim(),
         fuel_type: $('fuel-type').value.trim(),
         engine_size: $('engine-size').value.trim(),
+        engine_number: $('engine-number').value.trim(),
         tyre_size: $('tyre-size').value.trim(),
         radio_code: $('radio-code').value.trim(),
         oil_amount: $('oil-amount').value.trim(),
@@ -251,7 +252,7 @@ function resetForm() {
   $('mileage').value = '';
   $('description').value = '';
   ['vin', 'make', 'model', 'colour', 'cylinder-capacity', 'spare-keys',
-    'fuel-type', 'engine-size', 'tyre-size', 'radio-code', 'oil-amount']
+    'fuel-type', 'engine-size', 'engine-number', 'tyre-size', 'radio-code', 'oil-amount']
     .forEach((id) => { $(id).value = ''; });
 }
 
