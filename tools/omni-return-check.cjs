@@ -37,12 +37,18 @@ function makeFocusable(id, tagName) {
   const attrs = {};
   const el = {
     id, tagName, hidden: false, dataset: {}, value: '', _listeners: {},
+    // Real elements only report .closest('.drawer.open') truthy when they
+    // are actually inside the currently-open drawer's DOM subtree. This
+    // stub is not a real tree, so tests opt an element into that case
+    // explicitly by setting _inOpenDrawer, rather than modelling nesting.
+    _inOpenDrawer: false,
     addEventListener(ev, fn) { (el._listeners[ev] ??= []).push(fn); },
     focus() { activeElement = el; },
     blur() { if (activeElement === el) activeElement = bodyEl; },
     setAttribute(name, value) { attrs[name] = String(value); },
     getAttribute(name) { return attrs[name] ?? null; },
     removeAttribute(name) { delete attrs[name]; },
+    closest(sel) { return sel === '.drawer.open' && el._inOpenDrawer ? el : null; },
     isContentEditable: false,
     _attrs: attrs,
   };
@@ -262,10 +268,25 @@ dispatchKeydown(omniEl, 'Enter');
 check('a date-only search still falls back to the Invoices tab', shown[0] === 'invoices');
 store['omni-from'].value = '';
 
-// 9. Return must not steal a focused button's own activation.
+// 9. A plain page button holding focus — wherever the mouse left it after
+//    the last click, not something the user is about to press Return on
+//    again — must not block Return from reaching search. This is the
+//    reported bug: Return "sometimes doesn't register", which was every
+//    time focus happened to be sitting on any button anywhere on a page
+//    this button-heavy.
 activeElement = clearBtn;
 dispatchKeydown({ _listeners: {} }, 'Enter');
-check('Return does not steal focus from a focused button', activeElement === clearBtn);
+check('Return still reaches search through a plain focused button', activeElement === omniEl);
+
+// 9b. Inside the open drawer, a button is a real form action — "Save
+//     changes", "Mark reviewed" — and Return has to activate it, the way
+//     it would for any other on-screen form.
+activeElement = clearBtn;
+clearBtn._inOpenDrawer = true;
+dispatchKeydown({ _listeners: {} }, 'Enter');
+check('Return still activates a button inside the open drawer', activeElement === clearBtn);
+clearBtn._inOpenDrawer = false;
+activeElement = bodyEl;
 
 // 10. Return must not reach a search bar hidden behind an open dialog.
 activeElement = bodyEl;

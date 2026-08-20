@@ -260,13 +260,23 @@ document.addEventListener('keydown', (e) => {
   const tag = active?.tagName;
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
 
-  // Return carries native behaviour "/" does not: it activates a focused
-  // button or link, and a modal dialog may want it for its own primary
-  // action. Stealing it there would hijack the button, or send the cursor
-  // to a search bar sitting invisibly behind an open dialog.
+  // Return carries native behaviour "/" does not: inside an actual form —
+  // the invoice/vehicle drawer, a modal dialog — it activates a focused
+  // button, and stealing it there would hijack that action or send the
+  // cursor to a search bar sitting invisibly behind an open dialog.
+  //
+  // Outside a form, a focused button is usually just wherever the mouse
+  // left it after the last click — the period-range buttons on Spending,
+  // a row's Edit button, the topbar actions — not something the user is
+  // about to press Return on again. Exempting every button unconditionally
+  // made Return unreliable for the one thing it is advertised to do: it
+  // silently did nothing the moment focus happened to be sitting on any
+  // button anywhere on the page, which is most of the time on a page this
+  // button-heavy.
   if (e.key === 'Enter') {
-    if (tag === 'BUTTON' || tag === 'A' || active?.isContentEditable) return;
+    if (active?.isContentEditable) return;
     if (!$('gen-modal').hidden || !$('files-modal').hidden) return;
+    if ((tag === 'BUTTON' || tag === 'A') && active.closest('.drawer.open')) return;
   }
 
   e.preventDefault();
