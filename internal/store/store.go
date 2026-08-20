@@ -6,6 +6,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -39,6 +40,17 @@ type Invoice struct {
 	// consumables — rather than work on one vehicle. Without it, every such
 	// invoice would be flagged for a missing registration.
 	IsGeneral bool
+	// Returned marks an invoice a later credit note was automatically linked
+	// to — set on the ORIGINAL purchase, purely a display flag. It plays no
+	// part in any spend total: the credit note that caused it keeps its own
+	// row with its own (usually negative) amounts, which is what actually
+	// nets the total, exactly as it always has for any credit note whether
+	// or not it could be linked to an original.
+	Returned bool
+	// CreditOf is set on a credit note's own row: the id of the invoice it
+	// credits, when that could be matched automatically. Nil on every
+	// ordinary invoice, and on a credit note with no confident match.
+	CreditOf  *int64
 	Notes     string
 	RawJSON   string
 	CreatedAt string
@@ -86,6 +98,8 @@ CREATE TABLE IF NOT EXISTS invoices (
   brutto         REAL,
   needs_review   INTEGER NOT NULL DEFAULT 0,
   is_general     INTEGER NOT NULL DEFAULT 0,
+  returned       INTEGER NOT NULL DEFAULT 0,
+  credit_of      INTEGER REFERENCES invoices(id),
   notes          TEXT,
   raw_json       TEXT,
   created_at     TEXT NOT NULL
@@ -234,6 +248,8 @@ func Open(path string) (*Store, error) {
 func migrate(db *sql.DB) error {
 	added := map[string]string{
 		"is_general": "ALTER TABLE invoices ADD COLUMN is_general INTEGER NOT NULL DEFAULT 0",
+		"returned":   "ALTER TABLE invoices ADD COLUMN returned INTEGER NOT NULL DEFAULT 0",
+		"credit_of":  "ALTER TABLE invoices ADD COLUMN credit_of INTEGER REFERENCES invoices(id)",
 	}
 	have, err := columns(db, "invoices")
 	if err != nil {
@@ -317,13 +333,13 @@ func (s *Store) InsertInvoice(inv *Invoice) (int64, error) {
 			file_sha256, source_file, mail_uid, mail_subject, mail_from, mail_date,
 			supplier, invoice_number, invoice_date, vehicle_reg,
 			currency, netto, vat_amount, vat_rate, brutto,
-			needs_review, is_general, notes, raw_json, created_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			needs_review, is_general, returned, credit_of, notes, raw_json, created_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		inv.FileSHA256, inv.SourceFile, inv.MailUID, inv.MailSubject, inv.MailFrom, inv.MailDate,
 		inv.Supplier, inv.InvoiceNumber, inv.InvoiceDate, inv.VehicleReg,
 		inv.Currency, inv.Netto, inv.VATAmount, inv.VATRate, inv.Brutto,
-		boolToInt(inv.NeedsReview), boolToInt(inv.IsGeneral), inv.Notes, inv.RawJSON,
-		time.Now().UTC().Format(time.RFC3339))
+		boolToInt(inv.NeedsReview), boolToInt(inv.IsGeneral), boolToInt(inv.Returned), inv.CreditOf,
+		inv.Notes, inv.RawJSON, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return 0, fmt.Errorf("insert invoice: %w", err)
 	}
@@ -355,13 +371,64 @@ func (s *Store) InsertInvoice(inv *Invoice) (int64, error) {
 	return id, tx.Commit()
 }
 
+// FindInvoiceByReference looks for exactly one existing invoice from the
+// given supplier with this invoice number — the one a credit note's stated
+// reference is presumably crediting. Ambiguous (more than one candidate) or
+// absent matches report found=false rather than guessing: acting on the
+// wrong invoice would corrupt a financial record automatically, with nobody
+// reviewing the choice. A credit note is never itself treated as the
+// original (credit_of IS NULL) — crediting a credit note makes no sense and
+// would only ever indicate a supplier reusing a number.
+func (s *Store) FindInvoiceByReference(supplier, invoiceNumber string) (id int64, found bool, err error) {
+	supplier = strings.TrimSpace(supplier)
+	invoiceNumber = strings.TrimSpace(invoiceNumber)
+	if supplier == "" || invoiceNumber == "" {
+		return 0, false, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT id FROM invoices
+		WHERE supplier = ? AND invoice_number = ? AND credit_of IS NULL
+		LIMIT 2`, supplier, invoiceNumber)
+	if err != nil {
+		return 0, false, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var i int64
+		if err := rows.Scan(&i); err != nil {
+			return 0, false, err
+		}
+		ids = append(ids, i)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, err
+	}
+	if len(ids) != 1 {
+		return 0, false, nil
+	}
+	return ids[0], true, nil
+}
+
+// MarkReturned flags an invoice as returned — set on the original purchase
+// once a credit note has been automatically linked to it. Purely a display
+// flag: it plays no part in any spend total, which is why this is a single
+// targeted UPDATE rather than something every aggregate query needs to know
+// about — the credit note's own (usually negative) amounts are what actually
+// net the total, exactly as they always have.
+func (s *Store) MarkReturned(id int64) error {
+	_, err := s.db.Exec(`UPDATE invoices SET returned = 1 WHERE id = ?`, id)
+	return err
+}
+
 // ListInvoices returns invoices with their items, newest purchase first.
 // An empty since/until pair means "everything".
 func (s *Store) ListInvoices(since, until string) ([]Invoice, error) {
 	q := `SELECT id, file_sha256, source_file, mail_uid, mail_subject, mail_from, mail_date,
 	             supplier, invoice_number, invoice_date, vehicle_reg,
 	             currency, netto, vat_amount, vat_rate, brutto,
-	             needs_review, is_general, notes, created_at
+	             needs_review, is_general, returned, credit_of, notes, created_at
 	      FROM invoices`
 	var args []any
 	if since != "" && until != "" {

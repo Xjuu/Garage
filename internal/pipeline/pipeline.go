@@ -265,6 +265,9 @@ func processAttachment(ctx context.Context, cfg *config.Config, db *store.Store,
 		RawJSON:   raw,
 	}
 	inv.Notes, inv.NeedsReview = audit(res)
+	if err := linkCreditNote(db, res, inv); err != nil {
+		return err
+	}
 
 	for i, it := range res.Items {
 		inv.Items = append(inv.Items, store.Item{
@@ -277,11 +280,61 @@ func processAttachment(ctx context.Context, cfg *config.Config, db *store.Store,
 	if _, err := db.InsertInvoice(inv); err != nil {
 		return err
 	}
+	if inv.CreditOf != nil {
+		if err := db.MarkReturned(*inv.CreditOf); err != nil {
+			return err
+		}
+	}
 	st.Invoices++
-	logf.printf("stored %s %s  %s %.2f  %s  %d line(s)%s",
+	logf.printf("stored %s %s  %s %.2f  %s  %d line(s)%s%s",
 		inv.Supplier, inv.InvoiceNumber, inv.Currency, inv.Brutto, target(inv),
-		len(inv.Items), reviewSuffix(inv.NeedsReview))
+		len(inv.Items), reviewSuffix(inv.NeedsReview), creditSuffix(inv))
 	return nil
+}
+
+// linkCreditNote looks for the invoice a credit note's stated reference
+// names and, when found, links this credit note to it (store.Invoice.CreditOf)
+// so InsertInvoice's caller can flag that original returned. A credit note
+// is always still stored on its own — its own (usually negative) amounts
+// are what actually reduce the total, exactly as they always have — this
+// only adds the link when one is confidently found. No reference stated, or
+// no single matching invoice, gets flagged for a human instead of guessed.
+func linkCreditNote(db *store.Store, res *extract.Result, inv *store.Invoice) error {
+	if !res.IsCreditNote {
+		return nil
+	}
+	ref := strings.TrimSpace(res.CreditReference)
+	if ref == "" {
+		inv.Notes = appendNote(inv.Notes, "credit note with no stated reference to an original invoice — link it manually if it should mark one returned")
+		inv.NeedsReview = true
+		return nil
+	}
+	id, found, err := db.FindInvoiceByReference(res.Supplier, ref)
+	if err != nil {
+		return err
+	}
+	if !found {
+		inv.Notes = appendNote(inv.Notes,
+			fmt.Sprintf("credit note references invoice %q but no single matching invoice was found — link it manually", ref))
+		inv.NeedsReview = true
+		return nil
+	}
+	inv.CreditOf = &id
+	return nil
+}
+
+func appendNote(existing, add string) string {
+	if existing == "" {
+		return add
+	}
+	return existing + "; " + add
+}
+
+func creditSuffix(inv *store.Invoice) string {
+	if inv.CreditOf == nil {
+		return ""
+	}
+	return fmt.Sprintf("  [credits invoice #%d, marked returned]", *inv.CreditOf)
 }
 
 var isoDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)

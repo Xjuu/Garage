@@ -125,7 +125,7 @@ func (s *Store) Search(q Query) (*Page, error) {
 	sql := `SELECT i.id, i.file_sha256, i.source_file, i.mail_uid, i.mail_subject, i.mail_from,
 	               i.mail_date, i.supplier, i.invoice_number, i.invoice_date, i.vehicle_reg,
 	               i.currency, i.netto, i.vat_amount, i.vat_rate, i.brutto,
-	               i.needs_review, i.is_general, i.notes, i.created_at
+	               i.needs_review, i.is_general, i.returned, i.credit_of, i.notes, i.created_at
 	        FROM invoices i` + where +
 		fmt.Sprintf(" ORDER BY %s %s, i.id DESC LIMIT ? OFFSET ?", sortColumns[q.Sort], q.Dir)
 
@@ -180,16 +180,17 @@ type scanner interface {
 
 func scanInvoice(sc scanner) (*Invoice, error) {
 	var v Invoice
-	var review, general int
+	var review, general, returned int
 	err := sc.Scan(&v.ID, &v.FileSHA256, &v.SourceFile, &v.MailUID, &v.MailSubject,
 		&v.MailFrom, &v.MailDate, &v.Supplier, &v.InvoiceNumber, &v.InvoiceDate, &v.VehicleReg,
 		&v.Currency, &v.Netto, &v.VATAmount, &v.VATRate, &v.Brutto,
-		&review, &general, &v.Notes, &v.CreatedAt)
+		&review, &general, &returned, &v.CreditOf, &v.Notes, &v.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	v.NeedsReview = review != 0
 	v.IsGeneral = general != 0
+	v.Returned = returned != 0
 	return &v, nil
 }
 
@@ -199,7 +200,7 @@ func (s *Store) Get(id int64) (*Invoice, error) {
 		SELECT i.id, i.file_sha256, i.source_file, i.mail_uid, i.mail_subject, i.mail_from,
 		       i.mail_date, i.supplier, i.invoice_number, i.invoice_date, i.vehicle_reg,
 		       i.currency, i.netto, i.vat_amount, i.vat_rate, i.brutto,
-		       i.needs_review, i.is_general, i.notes, i.created_at
+		       i.needs_review, i.is_general, i.returned, i.credit_of, i.notes, i.created_at
 		FROM invoices i WHERE i.id = ?`, id)
 	v, err := scanInvoice(row)
 	if err != nil {
@@ -226,7 +227,11 @@ type Patch struct {
 	VATRate       *float64 `json:"vat_rate"`
 	Brutto        *float64 `json:"brutto"`
 	NeedsReview   *bool    `json:"needs_review"`
-	Notes         *string  `json:"notes"`
+	// Returned is a manual override for the automatic credit-note match — a
+	// human can flag an invoice returned even when no credit note was linked
+	// to it, or clear a wrong automatic link.
+	Returned *bool   `json:"returned"`
+	Notes    *string `json:"notes"`
 }
 
 func (s *Store) Update(id int64, p Patch) error {
@@ -266,6 +271,9 @@ func (s *Store) Update(id int64, p Patch) error {
 	}
 	if p.NeedsReview != nil {
 		add("needs_review", boolToInt(*p.NeedsReview))
+	}
+	if p.Returned != nil {
+		add("returned", boolToInt(*p.Returned))
 	}
 	if p.Notes != nil {
 		add("notes", *p.Notes)

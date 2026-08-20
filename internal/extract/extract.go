@@ -45,10 +45,18 @@ type Result struct {
 	IsInvoice     bool    `json:"is_invoice"`
 	// IsGeneralStock marks workshop consumables bought for the business at
 	// large rather than work on one vehicle.
-	IsGeneralStock bool   `json:"is_general_stock"`
-	Confidence     string `json:"confidence"`
-	Notes          string `json:"notes"`
-	Items          []Item `json:"items"`
+	IsGeneralStock bool `json:"is_general_stock"`
+	// IsCreditNote marks a credit note, credit memo or refund note — the
+	// supplier reducing what is owed, not a fresh purchase. Its own totals
+	// are still read as printed (see systemPrompt: usually negative).
+	IsCreditNote bool `json:"is_credit_note"`
+	// CreditReference is the supplier's own invoice/order number this credit
+	// note states it is crediting, exactly as printed, or "" if none is
+	// stated — used to link it back to that invoice automatically.
+	CreditReference string `json:"credit_reference"`
+	Confidence      string `json:"confidence"`
+	Notes           string `json:"notes"`
+	Items           []Item `json:"items"`
 }
 
 type Item struct {
@@ -168,6 +176,8 @@ Rules:
 - invoice_date is the date of purchase in ISO YYYY-MM-DD form.
 - currency is an ISO code such as GBP.
 - Set is_invoice false if the document is not an invoice or receipt (a statement, advert or delivery note).
+- Set is_credit_note true for a credit note, credit memo or refund note — a supplier document that reduces what is owed rather than a fresh purchase. It is still is_invoice true (a real financial document to keep), just not a purchase. Read netto/vat_amount/brutto exactly as printed — most credit notes print them as negative or clearly label them a deduction; report the sign as printed, do not invent one.
+- credit_reference: if a credit note states which of the supplier's own invoice or order numbers it is crediting against, copy that number here exactly as printed. Leave "" if none is stated — never guess one.
 - Set confidence to "low" if the document is blurred, cropped or ambiguous.
 - Use "" for missing text and 0 for missing numbers. Do not guess.`
 
@@ -205,16 +215,18 @@ func responseSchema() *genai.Schema {
 			"brutto":           {Type: genai.TypeNumber, Description: "Total including VAT"},
 			"is_invoice":       {Type: genai.TypeBoolean},
 			"is_general_stock": {Type: genai.TypeBoolean, Description: "True for workshop consumables and general stock not tied to one vehicle"},
+			"is_credit_note":   {Type: genai.TypeBoolean, Description: "True for a credit note, credit memo or refund note — reduces what is owed rather than a fresh purchase"},
+			"credit_reference": {Type: genai.TypeString, Description: "The invoice/order number this credit note states it is crediting, exactly as printed, or empty if none is stated"},
 			"confidence":       {Type: genai.TypeString, Enum: []string{"high", "medium", "low"}},
 			"notes":            {Type: genai.TypeString, Description: "Anything derived rather than read, or anything odd"},
 			"items":            {Type: genai.TypeArray, Items: item},
 		},
 		Required: []string{"supplier", "invoice_number", "invoice_date", "vehicle_reg", "currency",
 			"netto", "vat_amount", "vat_rate", "brutto", "is_invoice", "is_general_stock",
-			"confidence", "notes", "items"},
-		PropertyOrdering: []string{"is_invoice", "is_general_stock", "supplier", "invoice_number",
-			"invoice_date", "vehicle_reg", "currency", "netto", "vat_amount", "vat_rate", "brutto",
-			"confidence", "notes", "items"},
+			"is_credit_note", "credit_reference", "confidence", "notes", "items"},
+		PropertyOrdering: []string{"is_invoice", "is_general_stock", "is_credit_note", "credit_reference",
+			"supplier", "invoice_number", "invoice_date", "vehicle_reg", "currency", "netto", "vat_amount",
+			"vat_rate", "brutto", "confidence", "notes", "items"},
 	}
 }
 

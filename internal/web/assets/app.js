@@ -318,6 +318,11 @@ async function loadInvoices() {
           .map((i) => i.PartNumber).filter(Boolean);
         const shown = parts.slice(0, 2).map((p) => `<span class="part">${esc(p)}</span>`).join(' ');
         const more = parts.length > 2 ? ` <span class="muted">+${parts.length - 2}</span>` : '';
+        const status = [
+          inv.NeedsReview ? '<span class="pill flag">Check</span>' : '',
+          inv.Returned ? '<span class="pill">Returned</span>' : '',
+          inv.CreditOf ? '<span class="pill">Credit</span>' : '',
+        ].filter(Boolean).join(' ');
         return `
         <tr class="clickable${inv.NeedsReview ? ' flagged' : ''}" data-id="${inv.ID}">
           <td class="mono">${dash(inv.InvoiceDate)}</td>
@@ -328,7 +333,7 @@ async function loadInvoices() {
           <td class="num">${money(inv.Netto)}</td>
           <td class="num">${money(inv.VATAmount)}</td>
           <td class="num strong">${money(inv.Brutto)}</td>
-          <td>${inv.NeedsReview ? '<span class="pill flag">Check</span>' : ''}</td>
+          <td>${status}</td>
         </tr>`;
       }).join('')
     : `<tr><td colspan="9" class="empty">
@@ -462,6 +467,8 @@ async function openInvoice(id) {
 
     $('d-body').innerHTML = `
       ${inv.NeedsReview && inv.Notes ? `<div class="note"><strong>Needs review.</strong> ${esc(inv.Notes)}</div>` : ''}
+      ${inv.Returned ? '<div class="note"><strong>Returned.</strong> A credit note has been linked against this invoice — its amount is already netted off by that credit note\'s own total, this is a label only.</div>' : ''}
+      ${inv.CreditOf ? `<div class="note"><strong>Credit note.</strong> Linked to <a href="#" data-open-invoice="${inv.CreditOf}">invoice #${inv.CreditOf}</a>, which is marked returned.</div>` : ''}
 
       <div class="grid2">
         ${field('Supplier', 'supplier', inv.Supplier)}
@@ -492,9 +499,13 @@ async function openInvoice(id) {
         <div><span class="muted">Checksum</span> <span class="mono">${esc((inv.FileSHA256 || '').slice(0, 16))}…</span></div>
       </div>`;
 
+    $('d-body').querySelectorAll('a[data-open-invoice]').forEach((a) =>
+      a.addEventListener('click', (e) => { e.preventDefault(); openInvoice(a.dataset.openInvoice); }));
+
     // The source document is on disk, so this opens instantly and costs no API
   // call — the model only ever reads each invoice once, at ingest.
   $('d-original').href = '/api/invoices/' + inv.ID + '/file';
+  $('d-returned').textContent = inv.Returned ? 'Clear returned' : 'Mark returned';
   showDrawerFooter('invoice');
     $('drawer').classList.add('open');
     $('drawer').setAttribute('aria-hidden', 'false');
@@ -667,6 +678,21 @@ $('d-reviewed').addEventListener('click', async () => {
       method: 'PATCH', json: { needs_review: false },
     });
     toast('Marked reviewed');
+    closeDrawer();
+    refreshAll();
+  } catch (e) { toast(e.message, true); }
+});
+
+// Manual override for the automatic credit-note match — flag an invoice
+// returned even when no credit note was linked to it, or clear a wrong link.
+$('d-returned').addEventListener('click', async () => {
+  if (!state.current) return;
+  const next = !state.current.Returned;
+  try {
+    await api('/api/invoices/' + state.current.ID, {
+      method: 'PATCH', json: { returned: next },
+    });
+    toast(next ? 'Marked returned' : 'Cleared returned');
     closeDrawer();
     refreshAll();
   } catch (e) { toast(e.message, true); }

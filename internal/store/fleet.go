@@ -509,7 +509,7 @@ func (s *Store) invoicesWhere(where string, args ...any) ([]Invoice, error) {
 		SELECT i.id, i.file_sha256, i.source_file, i.mail_uid, i.mail_subject, i.mail_from,
 		       i.mail_date, i.supplier, i.invoice_number, i.invoice_date, i.vehicle_reg,
 		       i.currency, i.netto, i.vat_amount, i.vat_rate, i.brutto,
-		       i.needs_review, i.is_general, i.notes, i.created_at
+		       i.needs_review, i.is_general, i.returned, i.credit_of, i.notes, i.created_at
 		FROM invoices i WHERE `+where+`
 		ORDER BY COALESCE(NULLIF(i.invoice_date,''), i.created_at) DESC, i.id DESC`, args...)
 	if err != nil {
