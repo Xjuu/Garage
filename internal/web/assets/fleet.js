@@ -26,7 +26,12 @@ async function loadVehicleDetail() {
   const reg = state.currentReg;
   if (!reg) { show('vehicles'); return; }
 
+  // Keyed on the registration, not just "vehicle": clicking one vehicle row
+  // then quickly clicking another before the first request finishes must
+  // never let vehicle A's data land on a page currently open on vehicle B.
+  const seq = beginLoad('vehicle:' + reg);
   const d = await api('/api/vehicle/' + encodeURIComponent(reg));
+  if (stale('vehicle:' + reg, seq) || state.currentReg !== reg) return;
   const v = d.vehicle;
 
   // The silhouette sits in the heading beside the plate, at a size where the
@@ -104,7 +109,12 @@ async function loadPartDetail() {
   const part = state.currentPart;
   if (!part) { show('parts'); return; }
 
+  // Same reasoning as loadVehicleDetail: keyed on the part number itself, so
+  // clicking between two parts quickly can never let the slower one's data
+  // land on a page that has since moved on to a different part.
+  const seq = beginLoad('part:' + part);
   const d = await api('/api/part/' + encodeURIComponent(part));
+  if (stale('part:' + part, seq) || state.currentPart !== part) return;
   $('part-title').textContent = d.part_number;
   $('part-sub').textContent = d.description || '';
 
@@ -209,7 +219,9 @@ for (const id of ['nv-reg', 'nv-callsign', 'nv-make', 'nv-model', 'nv-driver']) 
 // ── fleet registry ────────────────────────────────────────────────────────
 
 async function loadFleet() {
+  const seq = beginLoad('fleet');
   companies = await api('/api/companies');
+  if (stale('fleet', seq)) return;
 
   // Keep the current choice across a reload so adding several vehicles to one
   // company does not mean re-picking it every time.
@@ -226,6 +238,7 @@ async function loadFleet() {
     </div>`).join('');
 
   const unassigned = await api('/api/registry/unassigned');
+  if (stale('fleet', seq)) return;
   $('unassigned-rows').innerHTML = unassigned.length
     ? unassigned.map((u) => `
         <tr>
@@ -241,6 +254,7 @@ async function loadFleet() {
     b.addEventListener('click', () => assignVehicle(b.dataset.reg)));
 
   registryData = await api('/api/registry');
+  if (stale('fleet', seq)) return;
   renderRegistryTable();
 }
 

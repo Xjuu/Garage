@@ -12,7 +12,9 @@ function humanBytes(n) {
 }
 
 async function loadAdmin() {
+  const seq = beginLoad('admin');
   const a = await api('/api/admin/status');
+  if (stale('admin', seq)) return;
 
   $('admin-tiles').innerHTML = [
     { k: 'Invoices', v: int(a.invoices) },

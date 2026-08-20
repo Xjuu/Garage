@@ -61,6 +61,22 @@ function debounce(fn, ms) {
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
+/** Guards a view loader against overwriting the screen with a stale
+    response. Switching tabs quickly, or typing a filter faster than the
+    previous request for it has finished, starts a new fetch before the old
+    one has come back — nothing stops the old one from resolving *after*
+    the new one and painting outdated results over the current, correct
+    ones, with no visible sign anything went wrong. It just looks like the
+    page quietly showed the wrong thing.
+    Usage: at the very top of an async loader, `const seq = beginLoad('x')`.
+    Right after the fetch that could race (usually the first await), before
+    any DOM is touched: `if (stale('x', seq)) return`. Only the most
+    recently *started* call for that key is allowed to render — an older
+    call finishing later always loses, regardless of resolution order. */
+const loadSeq = {};
+function beginLoad(key) { return (loadSeq[key] = (loadSeq[key] || 0) + 1); }
+function stale(key, seq) { return loadSeq[key] !== seq; }
+
 // ── state ─────────────────────────────────────────────────────────────────
 
 const state = {
@@ -200,7 +216,9 @@ buildNav();
 // ── overview ──────────────────────────────────────────────────────────────
 
 async function loadOverview() {
+  const seq = beginLoad('overview');
   const res = await api('/api/overview');
+  if (stale('overview', seq)) return;
   const o = res.overview;
   renderThisMonth(res.this_month);
 
@@ -262,7 +280,9 @@ async function loadOverview() {
 // ── invoices ──────────────────────────────────────────────────────────────
 
 async function loadInvoices() {
+  const seq = beginLoad('invoices');
   const data = await api('/api/invoices?' + queryString());
+  if (stale('invoices', seq)) return;
   state.total = data.total;
 
   $('inv-sub').textContent =
@@ -577,7 +597,9 @@ $('d-delete').addEventListener('click', async () => {
 // ── aggregate views ───────────────────────────────────────────────────────
 
 async function loadVehicles() {
+  const seq = beginLoad('vehicles');
   const rows = await api('/api/vehicles');
+  if (stale('vehicles', seq)) return;
   $('c-vehicles').textContent = int(rows.length);
   $('veh-rows').innerHTML = rows.length
     ? rows.map((v) => `
@@ -597,7 +619,9 @@ async function loadVehicles() {
 }
 
 async function loadSuppliers() {
+  const seq = beginLoad('suppliers');
   const rows = await api('/api/suppliers');
+  if (stale('suppliers', seq)) return;
   $('c-suppliers').textContent = int(rows.length);
   $('sup-rows').innerHTML = rows.length
     ? rows.map((s) => `
@@ -616,7 +640,10 @@ async function loadSuppliers() {
 }
 
 async function loadParts() {
-  state.parts = await api('/api/parts');
+  const seq = beginLoad('parts');
+  const rows = await api('/api/parts');
+  if (stale('parts', seq)) return;
+  state.parts = rows;
   $('c-parts').textContent = int(state.parts.length);
   renderParts();
 }
@@ -649,7 +676,9 @@ function renderParts() {
 $('parts-filter').addEventListener('input', debounce(renderParts, 160));
 
 async function loadVAT() {
+  const seq = beginLoad('vat');
   const rows = await api('/api/months');
+  if (stale('vat', seq)) return;
   const t = rows.reduce((a, m) => ({
     invoices: a.invoices + m.invoices, netto: a.netto + m.netto,
     vat: a.vat + m.vat, brutto: a.brutto + m.brutto,

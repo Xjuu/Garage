@@ -58,7 +58,9 @@ async function loadSpending() {
   if (spend.reg) p.set('reg', spend.reg);
   if (spend.scope) p.set('scope', spend.scope);
 
+  const seq = beginLoad('spending');
   const t = await api('/api/spending?' + p.toString());
+  if (stale('spending', seq)) return;
 
   const scopeLabel = { general: 'general stock only', vehicle: 'vehicle work only' }[t.scope] || '';
   $('spend-sub').textContent = [

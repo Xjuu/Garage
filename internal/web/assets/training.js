@@ -6,7 +6,9 @@
 let examples = [];
 
 async function loadTraining() {
+  const seq = beginLoad('training');
   const data = await api('/api/examples');
+  if (stale('training', seq)) return;
   examples = data.examples || [];
   $('examples-folder').textContent = data.folder;
 

@@ -133,6 +133,14 @@ const context = {
   openPart: () => {},
   state: { current: null, editingVehicle: null },
   viewLoaders: {},
+  // Real implementations, not no-ops: this file loads fleet.js in isolation
+  // (app.js, where these actually live, is never loaded here), and
+  // loadFleet() now calls them for real on every fetch stage. A no-op stub
+  // would make `stale()` always return false and silently stop testing
+  // anything about ordering — these behave exactly like app.js's originals.
+  loadSeq: {},
+  beginLoad(key) { return (context.loadSeq[key] = (context.loadSeq[key] || 0) + 1); },
+  stale(key, seq) { return context.loadSeq[key] !== seq; },
 };
 vm.createContext(context);
 new vm.Script(src, { filename: 'fleet.js' }).runInContext(context);
