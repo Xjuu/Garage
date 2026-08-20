@@ -190,3 +190,25 @@ func TestVerifyTOTPCodeAndReplayProtection(t *testing.T) {
 	}
 }
 
+// TOTPSecretForDisplay is the "add 2FA to another device" feature's data
+// source: it must report nothing until setup is confirmed, and must return
+// the same secret afterward — not a freshly generated one — since the whole
+// point is scanning the existing enrollment onto a second device.
+func TestTOTPSecretForDisplay(t *testing.T) {
+	a := newTestAuth(t, "correct horse battery staple")
+	if _, ok := a.TOTPSecretForDisplay(); ok {
+		t.Fatalf("a fresh account should report ok=false before 2FA is set up")
+	}
+
+	secret, _ := generateTOTPSecret()
+	a.SetTOTPSecret(secret)
+
+	got, ok := a.TOTPSecretForDisplay()
+	if !ok {
+		t.Fatalf("ok=false once 2FA is set up")
+	}
+	if got != secret {
+		t.Fatalf("TOTPSecretForDisplay = %q, want the same secret %q", got, secret)
+	}
+}
+

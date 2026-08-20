@@ -114,3 +114,29 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 	s.auth.IssueSession(w)
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
+
+// TEMP: lets an already signed-in session re-display its own confirmed 2FA
+// secret as a QR code, so it can be scanned into a second device (a new
+// phone, Authy on another platform, ...) without running `goldstar
+// totp-reset` and losing the original enrollment in the process. Registered
+// on the authenticated admin API — see routesAdmin — so the standard session
+// check already gates it; nothing extra is needed here.
+//
+// Remove this handler, its route in admin.go, and the matching panel in the
+// Admin page once it is no longer needed.
+func (s *Server) totpReshow(r *http.Request) (any, error) {
+	secret, ok := s.auth.TOTPSecretForDisplay()
+	if !ok {
+		return nil, fail(http.StatusBadRequest, "2FA is not set up on this account yet")
+	}
+
+	otpURL := auth.TOTPURL(totpIssuer, s.auth.AccountLabel(), secret)
+	png, err := qrcode.Encode(otpURL, qrcode.Medium, 256)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		"secret": auth.FormatSecretForDisplay(secret),
+		"qr_png": "data:image/png;base64," + base64.StdEncoding.EncodeToString(png),
+	}, nil
+}

@@ -525,6 +525,27 @@
       <button class="btn solid" id="change-pw">Change password</button>
     </div>
 
+    <!-- TEMP: re-shows the existing 2FA secret for adding to a second
+         device. Remove this section, the JS below, GET /api/admin/totp-qr
+         and totpReshow in totp.go once it is no longer needed. -->
+    <div class="section-title">Add 2FA to another device <span class="sub">(temporary)</span></div>
+    <div class="panel" style="padding:16px 18px;margin-bottom:18px">
+      <div class="sub" style="margin-bottom:12px">
+        Shows the same QR code from setup, so it can be scanned into a second
+        phone or authenticator app — this does not reset or change anything.
+      </div>
+      <button class="btn" id="show-totp-qr">Show QR code</button>
+      <div id="totp-reshow" hidden style="margin-top:16px">
+        <img id="totp-reshow-qr" class="totp-qr" width="200" height="200"
+             alt="Two-factor QR code">
+        <div class="totp-manual">
+          <span>Or enter this key manually:</span>
+          <code id="totp-reshow-secret" class="mono"></code>
+        </div>
+      </div>
+      <div class="login-err" id="totp-reshow-err"></div>
+    </div>
+
     <div class="section-title">Data</div>
     <div class="panel" style="padding:16px 18px;margin-bottom:18px">
       <div style="display:flex;gap:10px;flex-wrap:wrap">

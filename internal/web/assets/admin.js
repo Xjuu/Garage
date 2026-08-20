@@ -250,4 +250,26 @@ async function loadLogs() {
 
 setInterval(() => { if (state.view === 'admin') loadLogs(); }, LOG_EVERY);
 
+// ── add 2FA to another device (temporary) ───────────────────────────────
+// Re-shows the same secret from setup so it can be scanned into a second
+// device, without touching totp.secret or requiring a reset.
+
+$('show-totp-qr').addEventListener('click', async () => {
+  const btn = $('show-totp-qr');
+  const err = $('totp-reshow-err');
+  err.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+  try {
+    const data = await api('/api/admin/totp-qr');
+    $('totp-reshow-qr').src = data.qr_png;
+    $('totp-reshow-secret').textContent = data.secret;
+    $('totp-reshow').hidden = false;
+  } catch (e) {
+    err.textContent = e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Show QR code';
+});
+
 Object.assign(viewLoaders, { admin: () => loadAdmin().then(loadLogs) });

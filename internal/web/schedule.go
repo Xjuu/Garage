@@ -22,12 +22,13 @@ import (
 // laptop that slept through the moment picks the next one up correctly rather
 // than firing a burst of missed runs.
 type scheduler struct {
-	cfg   *config.Config
-	srv   *Server
-	loc   *time.Location
-	every time.Duration // interval mode; zero means daily-at-a-time mode
-	hour  int
-	min   int
+	cfg          *config.Config
+	srv          *Server
+	loc          *time.Location
+	every        time.Duration // interval mode; zero means daily-at-a-time mode
+	hour         int
+	min          int
+	hourlyMinute *int // non-nil means "every hour at this minute" mode; wins over every and hour/min
 
 	mu                  sync.Mutex
 	next                time.Time
@@ -46,9 +47,31 @@ func newScheduler(cfg *config.Config, srv *Server) (*scheduler, error) {
 		return nil, fmt.Errorf("unknown timezone %q: %w", cfg.SyncTZ, err)
 	}
 
-	// An interval wins over a fixed time. Both being set is a contradiction,
-	// and silently picking one without saying so is how people end up
-	// convinced the timer is broken.
+	// A fixed minute-of-the-hour is the most specific request and wins over
+	// both of the others. It exists because SyncEvery's countdown restarts
+	// from whenever the process last started — after a redeploy, the actual
+	// sync time silently drifts by however long ago that was. A fixed minute
+	// is the same real clock time every hour regardless of how many times
+	// the process has restarted since.
+	if cfg.SyncMinute != nil {
+		m := *cfg.SyncMinute
+		if m < 0 || m > 59 {
+			return nil, fmt.Errorf("GOLDSTAR_SYNC_MINUTE must be 0-59, got %d", m)
+		}
+		if every := strings.TrimSpace(cfg.SyncEvery); every != "" {
+			log.Printf("GOLDSTAR_SYNC_MINUTE is set; syncing hourly at :%02d:00 and ignoring GOLDSTAR_SYNC_EVERY=%s",
+				m, every)
+		}
+		if strings.TrimSpace(cfg.SyncAt) != "" {
+			log.Printf("GOLDSTAR_SYNC_MINUTE is set; syncing hourly at :%02d:00 and ignoring the daily time %s",
+				m, cfg.SyncAt)
+		}
+		return &scheduler{cfg: cfg, srv: srv, loc: loc, hourlyMinute: &m}, nil
+	}
+
+	// An interval wins over a fixed daily time. Both being set is a
+	// contradiction, and silently picking one without saying so is how
+	// people end up convinced the timer is broken.
 	if every := strings.TrimSpace(cfg.SyncEvery); every != "" {
 		d, err := time.ParseDuration(every)
 		if err != nil {
@@ -96,6 +119,14 @@ func parseClock(s string) (hour, min int, err error) {
 // `from`. Constructing the time in the target zone is what makes DST correct:
 // the zone decides what offset 18:30 has on that particular date.
 func (s *scheduler) nextRun(from time.Time) time.Time {
+	if s.hourlyMinute != nil {
+		local := from.In(s.loc)
+		next := time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), *s.hourlyMinute, 0, 0, s.loc)
+		if !next.After(local) {
+			next = next.Add(time.Hour)
+		}
+		return next
+	}
 	if s.every > 0 {
 		return from.Add(s.every)
 	}
@@ -124,10 +155,13 @@ func (s *scheduler) Status() map[string]any {
 		"next":       s.next.Format(time.RFC3339),
 		"next_local": s.next.In(s.loc).Format("Mon 2 Jan 15:04 MST"),
 	}
-	if s.every > 0 {
+	switch {
+	case s.hourlyMinute != nil:
+		out["at"] = fmt.Sprintf("hourly at :%02d:00", *s.hourlyMinute)
+	case s.every > 0:
 		out["every"] = s.every.String()
 		out["at"] = "every " + s.every.String()
-	} else {
+	default:
 		out["at"] = fmt.Sprintf("%02d:%02d", s.hour, s.min)
 	}
 	if !s.last.IsZero() {
@@ -151,9 +185,12 @@ func (s *scheduler) Status() map[string]any {
 
 // run blocks until ctx is cancelled, syncing once per day at the set time.
 func (s *scheduler) run(ctx context.Context) {
-	if s.every > 0 {
+	switch {
+	case s.hourlyMinute != nil:
+		log.Printf("mailbox sync scheduled hourly at :%02d:00 %s", *s.hourlyMinute, s.loc)
+	case s.every > 0:
 		log.Printf("mailbox sync scheduled every %s", s.every)
-	} else {
+	default:
 		log.Printf("mailbox sync scheduled for %02d:%02d %s daily", s.hour, s.min, s.loc)
 	}
 

@@ -37,6 +37,22 @@ type Config struct {
 	// intentions and one of them has to take precedence predictably.
 	SyncEvery string
 
+	// SyncMinute, when set, runs the sync every hour at that minute past the
+	// hour (0-59, e.g. 30 for xx:30:00) instead of SyncEvery's "N hours after
+	// whenever this process last started". That distinction matters in
+	// practice: a redeploy restarts the process, and SyncEvery's countdown
+	// restarts with it, so the actual sync time silently drifts by however
+	// long ago the last deploy happened. A fixed minute is the same real
+	// clock time every hour no matter how many times the process has
+	// restarted since.
+	//
+	// A pointer, not an int with -1 for "unset": xx:00:00 (minute 0) is a
+	// legitimate value, and an int default cannot tell "unset" apart from it
+	// without a sentinel someone eventually forgets to check for — the exact
+	// mistake a zero-value config.Config{} in a test would otherwise make
+	// silently. Wins over both SyncEvery and SyncAt when non-nil.
+	SyncMinute *int
+
 	// SyncAt is a local clock time ("18:30") in SyncTZ for once-a-day syncing,
 	// used only when SyncEvery is empty.
 	SyncAt string
@@ -88,6 +104,7 @@ func Load() (*Config, error) {
 		User:            envStr("GOLDSTAR_USER", ""),
 		Email:           envStr("GOLDSTAR_EMAIL", ""),
 		SyncEvery:       envStr("GOLDSTAR_SYNC_EVERY", "1h"),
+		SyncMinute:      envIntPtr("GOLDSTAR_SYNC_MINUTE"),
 		SyncAt:          envStr("GOLDSTAR_SYNC_AT", ""),
 		SyncTZ:          envStr("GOLDSTAR_SYNC_TZ", "Europe/London"),
 		BackupKeep:      envInt("GOLDSTAR_BACKUP_KEEP", 14),
@@ -395,4 +412,19 @@ func envInt(key string, def int) int {
 		}
 	}
 	return def
+}
+
+// envIntPtr returns nil when the variable is unset, empty, or malformed —
+// distinguishing "not configured" from "configured as zero", which a plain
+// int with a default cannot do without a sentinel value.
+func envIntPtr(key string) *int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return nil
+	}
+	return &n
 }

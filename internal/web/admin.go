@@ -29,6 +29,8 @@ func (s *Server) routesAdmin(api *http.ServeMux) {
 	api.HandleFunc("POST /api/admin/vacuum", s.json(s.vacuum))
 	api.HandleFunc("GET /api/admin/backup", s.backup)
 	api.HandleFunc("GET /api/admin/logs", s.json(s.recentLogs))
+	// TEMP — see totpReshow in totp.go.
+	api.HandleFunc("GET /api/admin/totp-qr", s.json(s.totpReshow))
 }
 
 // recentLogs backs the temporary "Server log" panel on the Admin page: the

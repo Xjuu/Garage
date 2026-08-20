@@ -290,6 +290,20 @@ func (a *Auth) TOTPConfigured() bool {
 	return a.totpSecret != ""
 }
 
+// TOTPSecretForDisplay returns the confirmed secret so an already fully
+// authenticated session can re-display it — e.g. to add the same 2FA to a
+// second device. ok is false when 2FA has not been set up yet.
+//
+// This is safe to expose to a signed-in session specifically because
+// reaching it already proves the session passed both factors: unlike the
+// login-time setup/confirm endpoints, showing the existing secret back to
+// its own already-authenticated owner adds no new way in.
+func (a *Auth) TOTPSecretForDisplay() (secret string, ok bool) {
+	a.totpMu.Lock()
+	defer a.totpMu.Unlock()
+	return a.totpSecret, a.totpSecret != ""
+}
+
 // SetTOTPSecret loads the confirmed secret at startup (from config) or after
 // a fresh setup is confirmed.
 func (a *Auth) SetTOTPSecret(secret string) {

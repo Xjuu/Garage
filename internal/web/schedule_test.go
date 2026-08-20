@@ -121,6 +121,97 @@ func TestIntervalScheduling(t *testing.T) {
 	}
 }
 
+// Hourly-at-a-fixed-minute mode is what GOLDSTAR_SYNC_MINUTE means: the same
+// real clock time every hour, unlike interval mode which counts forward from
+// whenever the process happened to start (and so drifts with every restart).
+func TestHourlyMinuteScheduling(t *testing.T) {
+	loc, _ := time.LoadLocation("Europe/London")
+	minute := 30
+	s := &scheduler{loc: loc, hourlyMinute: &minute}
+
+	cases := []struct {
+		name, from, want string
+	}{
+		{"before the slot this hour", "2026-08-19T14:10:00Z", "2026-08-19T14:30:00Z"},
+		{"after the slot rolls to next hour", "2026-08-19T14:45:00Z", "2026-08-19T15:30:00Z"},
+		{"exactly on the slot rolls to next hour", "2026-08-19T14:30:00Z", "2026-08-19T15:30:00Z"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			from, _ := time.Parse(time.RFC3339, c.from)
+			want, _ := time.Parse(time.RFC3339, c.want)
+			got := s.nextRun(from)
+			if !got.Equal(want) {
+				t.Errorf("nextRun(%s) = %s, want %s", c.from, got.Format(time.RFC3339), c.want)
+			}
+		})
+	}
+}
+
+// A restart must not push the sync later: whatever time hourlyMinute mode
+// computes has to be independent of when the process happens to boot,
+// which is the entire reason this mode exists over a plain interval.
+func TestHourlyMinuteSchedulingIsRestartInvariant(t *testing.T) {
+	loc, _ := time.LoadLocation("Europe/London")
+	minute := 30
+	s := &scheduler{loc: loc, hourlyMinute: &minute}
+
+	restartA, _ := time.Parse(time.RFC3339, "2026-08-19T14:05:00Z")
+	restartB, _ := time.Parse(time.RFC3339, "2026-08-19T14:25:00Z")
+	if got, want := s.nextRun(restartA), s.nextRun(restartB); !got.Equal(want) {
+		t.Errorf("two restarts within the same hour computed different next runs: %s vs %s", got, want)
+	}
+}
+
+// config.SyncMinute must win over both SyncEvery and SyncAt when set, and
+// GOLDSTAR_SYNC_MINUTE=0 (xx:00:00) must not be mistaken for "unset" — the
+// exact ambiguity a plain int with a -1 sentinel would risk.
+func TestSyncMinuteConfigTakesPriority(t *testing.T) {
+	zero := 0
+	cfg := &config.Config{
+		SyncMinute: &zero,
+		SyncEvery:  "1h",
+		SyncAt:     "18:30",
+		SyncTZ:     "Europe/London",
+	}
+	s, err := newScheduler(cfg, nil)
+	if err != nil {
+		t.Fatalf("newScheduler: %v", err)
+	}
+	if s.hourlyMinute == nil || *s.hourlyMinute != 0 {
+		t.Fatalf("hourlyMinute = %v, want a pointer to 0", s.hourlyMinute)
+	}
+	if s.every != 0 {
+		t.Errorf("every = %s, want interval mode disabled", s.every)
+	}
+}
+
+func TestSyncMinuteValidation(t *testing.T) {
+	for _, bad := range []int{-1, 60, 120} {
+		cfg := &config.Config{SyncMinute: &bad, SyncTZ: "Europe/London"}
+		if _, err := newScheduler(cfg, nil); err == nil {
+			t.Errorf("SyncMinute %d was accepted; it must be rejected", bad)
+		}
+	}
+}
+
+// Plain zero-value config.Config{} (what an easy-to-write test or a bug
+// would produce) must not accidentally activate hourly-at-minute-0 mode —
+// this is exactly what a *int nil default buys over an int with a sentinel.
+func TestZeroValueConfigDoesNotEnableHourlyMode(t *testing.T) {
+	cfg := &config.Config{SyncEvery: "1h", SyncTZ: "Europe/London"}
+	s, err := newScheduler(cfg, nil)
+	if err != nil {
+		t.Fatalf("newScheduler: %v", err)
+	}
+	if s.hourlyMinute != nil {
+		t.Fatalf("hourlyMinute = %v, want nil — SyncMinute was never set", s.hourlyMinute)
+	}
+	if s.every != time.Hour {
+		t.Errorf("every = %s, want 1h", s.every)
+	}
+}
+
 // An hourly sync must not chew through the retained snapshots. Backups are
 // throttled independently of how often the mailbox is checked.
 func TestBackupThrottledIndependentlyOfSync(t *testing.T) {
