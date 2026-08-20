@@ -79,26 +79,38 @@ type PartStockLookup struct {
 	Stock      float64 `json:"stock"`
 }
 
-// SearchStockParts finds part numbers that have actually appeared on an
-// invoice — the worker picks from what is real, rather than typing a number
-// freehand that might not exist or might have a typo splitting its history
-// in two, the same reasoning behind confusable-plate correction elsewhere.
+// SearchStockParts finds part numbers to pick from — either ones that have
+// actually appeared on an invoice, or ones an admin registered by hand on
+// the main dashboard for something kept on the shelf with no invoice yet.
+// An empty q (the "browse everything" case, rather than type-to-search)
+// matches every part, which is why limit is allowed much higher here than a
+// normal autocomplete list would need.
 func (s *Store) SearchStockParts(q string, limit int) ([]PartStockLookup, error) {
-	if limit <= 0 || limit > 50 {
-		limit = 20
+	if limit <= 0 || limit > 300 {
+		limit = 100
 	}
 	q = strings.TrimSpace(q)
 	like := "%" + q + "%"
 	rows, err := s.db.Query(`
-		SELECT it.part_number, MAX(it.description),
-		       COALESCE(SUM(it.quantity),0) - COALESCE((
-		           SELECT SUM(st.quantity) FROM stock_takes st WHERE st.part_number = it.part_number
-		       ), 0)
-		FROM invoice_items it
-		WHERE it.part_number <> '' AND (it.part_number LIKE ? OR it.description LIKE ?)
-		GROUP BY it.part_number
-		ORDER BY it.part_number
-		LIMIT ?`, like, like, limit)
+		SELECT part_number, description, stock FROM (
+			SELECT it.part_number AS part_number, MAX(it.description) AS description,
+			       COALESCE(SUM(it.quantity),0)
+			         - COALESCE((SELECT SUM(st.quantity) FROM stock_takes st WHERE st.part_number = it.part_number),0)
+			         + COALESCE((SELECT mp.starting_stock FROM manual_parts mp WHERE mp.part_number = it.part_number),0) AS stock
+			FROM invoice_items it
+			WHERE it.part_number <> '' AND (it.part_number LIKE ? OR it.description LIKE ?)
+			GROUP BY it.part_number
+
+			UNION ALL
+
+			SELECT mp.part_number, mp.description,
+			       mp.starting_stock - COALESCE((SELECT SUM(st.quantity) FROM stock_takes st WHERE st.part_number = mp.part_number),0)
+			FROM manual_parts mp
+			WHERE NOT EXISTS (SELECT 1 FROM invoice_items it2 WHERE it2.part_number = mp.part_number)
+			  AND (mp.part_number LIKE ? OR mp.description LIKE ?)
+		)
+		ORDER BY part_number
+		LIMIT ?`, like, like, like, like, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -119,16 +131,27 @@ func (s *Store) SearchStockParts(q string, limit int) ([]PartStockLookup, error)
 
 // StockPartByNumber is the same lookup for exactly one part number — used to
 // refresh the on-screen stock count right after logging a take, without a
-// full search round trip.
+// full search round trip. Checks invoice history first, then falls back to
+// a manually registered part with no invoice history yet.
 func (s *Store) StockPartByNumber(partNumber string) (*PartStockLookup, error) {
 	row := s.db.QueryRow(`
-		SELECT it.part_number, MAX(it.description),
-		       COALESCE(SUM(it.quantity),0) - COALESCE((
-		           SELECT SUM(st.quantity) FROM stock_takes st WHERE st.part_number = it.part_number
-		       ), 0)
-		FROM invoice_items it
-		WHERE it.part_number = ?
-		GROUP BY it.part_number`, partNumber)
+		SELECT part_number, description, stock FROM (
+			SELECT it.part_number AS part_number, MAX(it.description) AS description,
+			       COALESCE(SUM(it.quantity),0)
+			         - COALESCE((SELECT SUM(st.quantity) FROM stock_takes st WHERE st.part_number = it.part_number),0)
+			         + COALESCE((SELECT mp.starting_stock FROM manual_parts mp WHERE mp.part_number = it.part_number),0) AS stock
+			FROM invoice_items it
+			WHERE it.part_number = ?
+			GROUP BY it.part_number
+
+			UNION ALL
+
+			SELECT mp.part_number, mp.description,
+			       mp.starting_stock - COALESCE((SELECT SUM(st.quantity) FROM stock_takes st WHERE st.part_number = mp.part_number),0)
+			FROM manual_parts mp
+			WHERE mp.part_number = ? AND NOT EXISTS (SELECT 1 FROM invoice_items it2 WHERE it2.part_number = mp.part_number)
+		)
+		LIMIT 1`, partNumber, partNumber)
 	var p PartStockLookup
 	var desc sql.NullString
 	if err := row.Scan(&p.PartNumber, &desc, &p.Stock); err != nil {
@@ -138,12 +161,72 @@ func (s *Store) StockPartByNumber(partNumber string) (*PartStockLookup, error) {
 	return &p, nil
 }
 
+// AddManualPart registers a part from the admin page — one that may never
+// have been invoiced — so it shows up in search and stock everywhere else
+// immediately. Calling it again for the same part number edits it in place
+// (description and starting stock are both simply overwritten, not added
+// to) rather than erroring, so the same form serves as both "add" and
+// "correct a mistake".
+func (s *Store) AddManualPart(partNumber, description string, startingStock float64) error {
+	partNumber = strings.TrimSpace(partNumber)
+	if partNumber == "" {
+		return fmt.Errorf("a part number is required")
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO manual_parts (part_number, description, starting_stock, created_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(part_number) DO UPDATE SET description = excluded.description, starting_stock = excluded.starting_stock`,
+		partNumber, strings.TrimSpace(description), startingStock, now())
+	return err
+}
+
+// RemoveManualPart deletes the manual registration only. A part that has
+// since picked up real invoice history keeps showing up from that — this
+// just removes the hand-entered starting-stock offset and description.
+func (s *Store) RemoveManualPart(partNumber string) error {
+	_, err := s.db.Exec(`DELETE FROM manual_parts WHERE part_number = ?`, partNumber)
+	return err
+}
+
+// ManualPart is one row an admin has registered by hand — surfaced
+// separately from the main Parts() list so the admin page can show which
+// parts exist only because someone typed them in, not because of an
+// invoice.
+type ManualPart struct {
+	PartNumber    string  `json:"part_number"`
+	Description   string  `json:"description"`
+	StartingStock float64 `json:"starting_stock"`
+	CreatedAt     string  `json:"created_at"`
+}
+
+func (s *Store) ListManualParts() ([]ManualPart, error) {
+	rows, err := s.db.Query(`
+		SELECT part_number, description, starting_stock, created_at
+		FROM manual_parts ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []ManualPart{}
+	for rows.Next() {
+		var m ManualPart
+		if err := rows.Scan(&m.PartNumber, &m.Description, &m.StartingStock, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // SearchStockVehicles finds registrations from the fleet registry — the
 // worker picks the car the same considered way the part is picked, rather
 // than typing a plate that might not match the registry's normalised form.
+// An empty q matches every vehicle, the same "browse everything" case as
+// SearchStockParts.
 func (s *Store) SearchStockVehicles(q string, limit int) ([]string, error) {
-	if limit <= 0 || limit > 50 {
-		limit = 20
+	if limit <= 0 || limit > 300 {
+		limit = 100
 	}
 	q = strings.ToUpper(strings.TrimSpace(q))
 	like := "%" + q + "%"

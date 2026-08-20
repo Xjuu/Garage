@@ -215,6 +215,19 @@ CREATE TABLE IF NOT EXISTS parts_allowed_ips (
   label      TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
+
+-- A part registered from the admin page rather than discovered on an
+-- invoice — for something kept on the shelf that hasn't been bought through
+-- a tracked supplier invoice yet. starting_stock is a standing offset added
+-- into every stock calculation for this part number alongside whatever it
+-- later picks up from real invoices, not a one-off adjustment that gets
+-- consumed and forgotten.
+CREATE TABLE IF NOT EXISTS manual_parts (
+  part_number    TEXT PRIMARY KEY,
+  description    TEXT NOT NULL DEFAULT '',
+  starting_stock REAL NOT NULL DEFAULT 0,
+  created_at     TEXT NOT NULL
+);
 `
 
 // seed inserts the fleet the user actually operates. Overall Clients is the

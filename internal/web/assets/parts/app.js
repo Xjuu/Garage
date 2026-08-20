@@ -73,6 +73,16 @@ function updateVisibility() {
   $('step-part').hidden = !!pickedPart;
   $('vehicle-search').hidden = !!pickedVehicle;
   if (pickedVehicle) $('vehicle-results').hidden = true;
+
+  // The trail at the top always shows all three steps; only their state
+  // changes, so a glance tells you where you are without reading anything.
+  const step = pickedPart && pickedVehicle ? 'qty' : pickedPart ? 'vehicle' : 'part';
+  document.querySelectorAll('.pc-trail-step').forEach((el) => {
+    const s = el.dataset.step;
+    el.classList.toggle('active', s === step);
+    el.classList.toggle('done',
+      (s === 'part' && !!pickedPart) || (s === 'vehicle' && !!pickedVehicle));
+  });
 }
 
 // ── step 1: part ─────────────────────────────────────────────────────────
@@ -104,18 +114,26 @@ $('picked-part-clear').addEventListener('click', () => {
   $('part-search').focus();
 });
 
-const searchParts = debounce(async () => {
+// A blank query is "browse everything" rather than "no results" — tapping
+// into an empty search box shows the full list straight away, so a worker
+// who doesn't know the part number offhand can just scroll and tap instead
+// of having to type something first.
+async function doSearchParts() {
   const q = $('part-search').value.trim();
+  const browsing = !q;
   const results = $('part-results');
-  if (!q) { results.hidden = true; results.innerHTML = ''; return; }
+  const label = $('part-results-label');
 
   let rows;
   try {
-    rows = await api('/api/parts/search-parts?q=' + encodeURIComponent(q));
+    rows = await api('/api/parts/search-parts?q=' + encodeURIComponent(q) + (browsing ? '&limit=60' : ''));
   } catch (e) {
     toast(e.message, true);
     return;
   }
+
+  label.hidden = !browsing;
+  label.textContent = browsing ? `All parts (${rows.length}) — keep typing to narrow it down` : '';
 
   results.hidden = false;
   results.innerHTML = rows.length
@@ -127,15 +145,19 @@ const searchParts = debounce(async () => {
           </span>
           <span class="r-stock${p.stock <= 0 ? ' low' : ''}">${num(p.stock)} left</span>
         </button>`).join('')
-    : '<div class="r-empty">Nothing matches that.</div>';
+    : `<div class="r-empty">${browsing ? 'No parts yet — they appear here once invoiced, or add one from Admin.' : 'Nothing matches that.'}</div>`;
 
   results.querySelectorAll('button[data-part]').forEach((b) => {
     const row = rows.find((p) => p.part_number === b.dataset.part);
     b.addEventListener('click', () => pickPart(row));
   });
-}, 200);
+}
+const searchParts = debounce(doSearchParts, 200);
 
 $('part-search').addEventListener('input', searchParts);
+$('part-search').addEventListener('focus', () => {
+  if (!$('part-search').value.trim()) doSearchParts();
+});
 
 // ── step 2: vehicle ──────────────────────────────────────────────────────
 
@@ -154,18 +176,22 @@ $('picked-vehicle-clear').addEventListener('click', () => {
   $('vehicle-search').focus();
 });
 
-const searchVehicles = debounce(async () => {
+async function doSearchVehicles() {
   const q = $('vehicle-search').value.trim();
+  const browsing = !q;
   const results = $('vehicle-results');
-  if (!q) { results.hidden = true; results.innerHTML = ''; return; }
+  const label = $('vehicle-results-label');
 
   let rows;
   try {
-    rows = await api('/api/parts/search-vehicles?q=' + encodeURIComponent(q));
+    rows = await api('/api/parts/search-vehicles?q=' + encodeURIComponent(q) + (browsing ? '&limit=60' : ''));
   } catch (e) {
     toast(e.message, true);
     return;
   }
+
+  label.hidden = !browsing;
+  label.textContent = browsing ? `All vehicles (${rows.length}) — keep typing to narrow it down` : '';
 
   results.hidden = false;
   results.innerHTML = rows.length
@@ -173,15 +199,27 @@ const searchVehicles = debounce(async () => {
         <button type="button" data-reg="${esc(reg)}">
           <span class="r-main"><span class="r-title">${esc(reg)}</span></span>
         </button>`).join('')
-    : '<div class="r-empty">No vehicle matches that.</div>';
+    : `<div class="r-empty">${browsing ? 'No vehicles in the registry yet.' : 'No vehicle matches that.'}</div>`;
 
   results.querySelectorAll('button[data-reg]').forEach((b) =>
     b.addEventListener('click', () => pickVehicle(b.dataset.reg)));
-}, 200);
+}
+const searchVehicles = debounce(doSearchVehicles, 200);
 
 $('vehicle-search').addEventListener('input', searchVehicles);
+$('vehicle-search').addEventListener('focus', () => {
+  if (!$('vehicle-search').value.trim()) doSearchVehicles();
+});
 
 // ── step 3: quantity, and logging it ────────────────────────────────────
+
+function nudgeQty(delta) {
+  const current = Number($('qty').value) || 0;
+  const next = Math.max(0.01, current + delta);
+  $('qty').value = Number.isInteger(next) ? next : next.toFixed(2);
+}
+$('qty-minus').addEventListener('click', () => nudgeQty(-1));
+$('qty-plus').addEventListener('click', () => nudgeQty(1));
 
 $('btn-log').addEventListener('click', async () => {
   const err = $('log-err');

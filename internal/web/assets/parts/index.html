@@ -22,14 +22,23 @@
 
 <main class="pc-main">
 
+  <nav class="pc-trail" aria-hidden="true">
+    <span class="pc-trail-step" data-step="part">1 · Part</span>
+    <span class="pc-trail-sep">→</span>
+    <span class="pc-trail-step" data-step="vehicle">2 · Vehicle</span>
+    <span class="pc-trail-sep">→</span>
+    <span class="pc-trail-step" data-step="qty">3 · Quantity</span>
+  </nav>
+
   <!-- Step 1: which part -->
   <section class="pc-step" id="step-part">
     <div class="section-title">Which part</div>
     <div class="search-wrap">
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
       <input type="search" id="part-search" autocomplete="off"
-             placeholder="Part number or description…">
+             placeholder="Part number or description… or tap in to browse all">
     </div>
+    <div class="pc-results-label" id="part-results-label" hidden></div>
     <div class="pc-results" id="part-results" hidden></div>
   </section>
 
@@ -50,8 +59,9 @@
     <div class="search-wrap">
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
       <input type="search" id="vehicle-search" autocomplete="off"
-             placeholder="Registration…">
+             placeholder="Registration… or tap in to browse all">
     </div>
+    <div class="pc-results-label" id="vehicle-results-label" hidden></div>
     <div class="pc-results" id="vehicle-results" hidden></div>
   </section>
 
@@ -66,9 +76,11 @@
   <section class="pc-step" id="step-qty" hidden>
     <div class="section-title">How many</div>
     <div class="pc-qty-row">
-      <input type="number" id="qty" value="1" min="0.01" step="any">
-      <button class="btn solid pc-log" id="btn-log">Log it</button>
+      <button class="btn qty-step" id="qty-minus" type="button" aria-label="One fewer">−</button>
+      <input type="number" id="qty" value="1" min="0.01" step="any" inputmode="decimal">
+      <button class="btn qty-step" id="qty-plus" type="button" aria-label="One more">+</button>
     </div>
+    <button class="btn solid pc-log" id="btn-log">Log it</button>
     <div class="login-err" id="log-err" role="alert"></div>
   </section>
 

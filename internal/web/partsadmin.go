@@ -20,6 +20,10 @@ func (s *Server) routesPartsAdmin(api *http.ServeMux) {
 	api.HandleFunc("GET /api/admin/parts-takes", s.json(s.recentStockTakes))
 	api.HandleFunc("POST /api/admin/parts-pin", s.json(s.changePartsPIN))
 
+	api.HandleFunc("GET /api/admin/parts-catalog", s.json(s.listManualParts))
+	api.HandleFunc("POST /api/admin/parts-catalog", s.json(s.addManualPart))
+	api.HandleFunc("DELETE /api/admin/parts-catalog", s.json(s.removeManualPart))
+
 	api.HandleFunc("GET /api/admin/parts-photo/{part}", s.servePartPhoto)
 	api.HandleFunc("POST /api/admin/parts-photo/{part}", s.json(s.uploadPartPhoto))
 }
@@ -75,6 +79,40 @@ func (s *Server) revokePartsDevice(r *http.Request) (any, error) {
 
 func (s *Server) recentStockTakes(r *http.Request) (any, error) {
 	return s.db.RecentStockTakes(200)
+}
+
+func (s *Server) listManualParts(r *http.Request) (any, error) {
+	return s.db.ListManualParts()
+}
+
+// addManualPart is "add a part to the list" from the main dashboard — for
+// something kept on the shelf that hasn't gone through a tracked supplier
+// invoice yet. Calling it again for a part number that's already registered
+// edits it in place.
+func (s *Server) addManualPart(r *http.Request) (any, error) {
+	var body struct {
+		PartNumber    string  `json:"part_number"`
+		Description   string  `json:"description"`
+		StartingStock float64 `json:"starting_stock"`
+	}
+	if err := decode(r, &body); err != nil {
+		return nil, err
+	}
+	if err := s.db.AddManualPart(body.PartNumber, body.Description, body.StartingStock); err != nil {
+		return nil, fail(http.StatusBadRequest, "%v", err)
+	}
+	return okResponse(), nil
+}
+
+func (s *Server) removeManualPart(r *http.Request) (any, error) {
+	part := r.URL.Query().Get("part")
+	if part == "" {
+		return nil, fail(http.StatusBadRequest, "part is required")
+	}
+	if err := s.db.RemoveManualPart(part); err != nil {
+		return nil, err
+	}
+	return okResponse(), nil
 }
 
 // changePartsPIN doesn't ask for the current PIN first the way the

@@ -599,6 +599,28 @@
       <div id="pp-result" style="font-size:13px;margin-top:10px"></div>
     </div>
 
+    <div class="section-title">Parts counter — catalog</div>
+    <div class="panel" style="padding:16px 18px;margin-bottom:18px">
+      <div class="m" style="color:var(--g4);font-size:12px;margin-bottom:12px">
+        Part search only finds part numbers that have appeared on an invoice.
+        Add one here to make it searchable on the counter before it's ever
+        been invoiced — useful for something already on the shelf. Adding
+        the same part number again edits it.
+      </div>
+      <div class="grid2" style="margin-bottom:12px">
+        <div class="field"><label for="pc-num">Part number</label>
+          <input type="text" id="pc-num" placeholder="e.g. JRP308W" autocomplete="off"></div>
+        <div class="field"><label for="pc-desc">Description</label>
+          <input type="text" id="pc-desc" placeholder="e.g. Number plate fixing screw" autocomplete="off"></div>
+        <div class="field"><label for="pc-stock">Starting stock</label>
+          <input type="number" id="pc-stock" value="0" min="0" step="any"></div>
+      </div>
+      <button class="btn" id="pc-add">Add part</button>
+      <div class="table-scroll" style="margin-top:14px"><table>
+        <thead><tr><th>Part</th><th>Description</th><th class="num">Starting stock</th><th>Added</th><th></th></tr></thead>
+        <tbody id="pc-rows"></tbody></table></div>
+    </div>
+
     <div class="section-title">Parts counter — devices</div>
     <div class="panel"><div class="table-scroll"><table>
       <thead><tr><th>Device</th><th>First seen</th><th>Last seen</th><th>Status</th><th></th></tr></thead>

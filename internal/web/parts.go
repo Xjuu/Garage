@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"strconv"
 
 	"goldstar/internal/partsauth"
 )
@@ -175,11 +176,25 @@ func (s *Server) handlePartsSession(w http.ResponseWriter, r *http.Request) {
 // ── the counter itself ──────────────────────────────────────────────────
 
 func (s *Server) partsSearchParts(r *http.Request) (any, error) {
-	return s.db.SearchStockParts(r.URL.Query().Get("q"), 20)
+	return s.db.SearchStockParts(r.URL.Query().Get("q"), queryLimit(r, 20))
 }
 
 func (s *Server) partsSearchVehicles(r *http.Request) (any, error) {
-	return s.db.SearchStockVehicles(r.URL.Query().Get("q"), 20)
+	return s.db.SearchStockVehicles(r.URL.Query().Get("q"), queryLimit(r, 20))
+}
+
+// queryLimit reads an optional ?limit= override — the worker app's normal
+// type-to-search uses the default, but "browse everything" (an empty query,
+// fired the moment the search box is focused) asks for a much longer list.
+// Anything unparsable or non-positive falls back to def rather than erroring
+// over what is a convenience parameter, not user input that needs validating.
+func queryLimit(r *http.Request, def int) int {
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
 }
 
 func (s *Server) partsStockLookup(r *http.Request) (any, error) {

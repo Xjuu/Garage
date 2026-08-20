@@ -192,6 +192,146 @@ func TestRegisterPartsDeviceUpdatesLastSeenNotFirstSeen(t *testing.T) {
 	}
 }
 
+// A part registered by hand, with no invoice ever mentioning it, must still
+// turn up in search and stock lookups — that's the entire point of letting
+// an admin add one before it's been bought through a tracked invoice.
+func TestManualPartWithNoInvoiceHistoryIsSearchableAndCountable(t *testing.T) {
+	db := open(t)
+	if err := db.AddManualPart("SHELF-9", "Bag of shelf clips", 40); err != nil {
+		t.Fatalf("AddManualPart: %v", err)
+	}
+
+	found, err := db.SearchStockParts("SHELF", 10)
+	if err != nil {
+		t.Fatalf("SearchStockParts: %v", err)
+	}
+	if len(found) != 1 || found[0].PartNumber != "SHELF-9" || found[0].Stock != 40 {
+		t.Fatalf("SearchStockParts(SHELF) = %+v, want one row, SHELF-9, stock 40", found)
+	}
+
+	p, err := db.StockPartByNumber("SHELF-9")
+	if err != nil {
+		t.Fatalf("StockPartByNumber: %v", err)
+	}
+	if p.Stock != 40 || p.Desc != "Bag of shelf clips" {
+		t.Fatalf("StockPartByNumber(SHELF-9) = %+v", p)
+	}
+
+	db.SaveVehicle("AB12CDE", VehiclePatch{})
+	if err := db.LogStockTake("SHELF-9", "AB12CDE", 5, "device-1"); err != nil {
+		t.Fatalf("LogStockTake: %v", err)
+	}
+	after, err := db.StockPartByNumber("SHELF-9")
+	if err != nil {
+		t.Fatalf("StockPartByNumber after a take: %v", err)
+	}
+	if after.Stock != 35 {
+		t.Fatalf("stock after taking 5 of a manually-added 40 = %v, want 35", after.Stock)
+	}
+}
+
+// A manual starting stock is a standing offset, not a one-off top-up: once a
+// part also picks up real invoice history, both numbers must add together
+// rather than the manual entry being replaced or ignored.
+func TestManualStartingStockAddsToInvoicedStock(t *testing.T) {
+	db := open(t)
+	if err := db.AddManualPart("JRP308W", "", 10); err != nil {
+		t.Fatalf("AddManualPart: %v", err)
+	}
+	add(t, db, Invoice{
+		InvoiceNumber: "INV-1", VehicleReg: "AB12CDE", InvoiceDate: "2026-08-01",
+		Items: []Item{{PartNumber: "JRP308W", Desc: "Fixings", Quantity: 6}},
+	})
+
+	p, err := db.StockPartByNumber("JRP308W")
+	if err != nil {
+		t.Fatalf("StockPartByNumber: %v", err)
+	}
+	if p.Stock != 16 {
+		t.Fatalf("stock = %v, want 16 (10 manual + 6 invoiced)", p.Stock)
+	}
+
+	// And it must show up exactly once, not doubled by both branches of the
+	// UNION firing for the same part number.
+	rows, err := db.Parts()
+	if err != nil {
+		t.Fatalf("Parts: %v", err)
+	}
+	n := 0
+	for _, r := range rows {
+		if r.PartNumber == "JRP308W" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("JRP308W appeared %d times in Parts(), want exactly 1", n)
+	}
+}
+
+// Adding the same part number twice edits it — the same form serves as
+// "add" and "fix a typo", rather than erroring on the second call.
+func TestAddManualPartTwiceEditsInPlace(t *testing.T) {
+	db := open(t)
+	if err := db.AddManualPart("SHELF-9", "wrong description", 5); err != nil {
+		t.Fatalf("first AddManualPart: %v", err)
+	}
+	if err := db.AddManualPart("SHELF-9", "correct description", 12); err != nil {
+		t.Fatalf("second AddManualPart: %v", err)
+	}
+
+	parts, err := db.ListManualParts()
+	if err != nil {
+		t.Fatalf("ListManualParts: %v", err)
+	}
+	if len(parts) != 1 {
+		t.Fatalf("ListManualParts = %+v, want exactly one row (edited, not duplicated)", parts)
+	}
+	if parts[0].Description != "correct description" || parts[0].StartingStock != 12 {
+		t.Fatalf("ListManualParts[0] = %+v, want the edited values", parts[0])
+	}
+}
+
+func TestAddManualPartRejectsEmptyPartNumber(t *testing.T) {
+	db := open(t)
+	if err := db.AddManualPart("", "desc", 1); err == nil {
+		t.Fatalf("AddManualPart with an empty part number should have been rejected")
+	}
+}
+
+// Removing the manual entry only removes the hand-typed starting stock and
+// description — a part that has since picked up real invoice history keeps
+// showing up from that alone.
+func TestRemoveManualPartLeavesInvoiceHistoryIntact(t *testing.T) {
+	db := open(t)
+	if err := db.AddManualPart("JRP308W", "Fixings", 10); err != nil {
+		t.Fatalf("AddManualPart: %v", err)
+	}
+	add(t, db, Invoice{
+		InvoiceNumber: "INV-1", VehicleReg: "AB12CDE", InvoiceDate: "2026-08-01",
+		Items: []Item{{PartNumber: "JRP308W", Desc: "Fixings", Quantity: 6}},
+	})
+
+	if err := db.RemoveManualPart("JRP308W"); err != nil {
+		t.Fatalf("RemoveManualPart: %v", err)
+	}
+
+	p, err := db.StockPartByNumber("JRP308W")
+	if err != nil {
+		t.Fatalf("StockPartByNumber after removing the manual entry: %v", err)
+	}
+	if p.Stock != 6 {
+		t.Fatalf("stock after removing the +10 manual offset = %v, want 6 (invoiced only)", p.Stock)
+	}
+
+	parts, err := db.ListManualParts()
+	if err != nil {
+		t.Fatalf("ListManualParts: %v", err)
+	}
+	if len(parts) != 0 {
+		t.Fatalf("ListManualParts after removal = %+v, want none", parts)
+	}
+}
+
 func TestAllowedIPStartsClosedAndCanBeOpenedAndRevoked(t *testing.T) {
 	db := open(t)
 

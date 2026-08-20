@@ -6,7 +6,26 @@
   display: flex; flex-direction: column; gap: 18px;
 }
 
+/* Three steps, always visible, so someone glancing at the phone mid-task
+   knows where they are without reading anything — the current step is
+   dark and bold, a finished one is quietly checked off, what's still ahead
+   stays faint. */
+.pc-trail {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--g3);
+}
+.pc-trail-step { color: var(--g3); transition: color .15s; }
+.pc-trail-step.done { color: var(--g5); }
+.pc-trail-step.done::after { content: " ✓"; }
+.pc-trail-step.active { color: var(--ink); }
+.pc-trail-sep { color: var(--g2); font-weight: 400; }
+
 .pc-step { display: flex; flex-direction: column; gap: 10px; }
+
+.pc-results-label {
+  font-size: 12px; color: var(--g4); margin-top: -2px;
+}
 
 .pc-results {
   display: flex; flex-direction: column; gap: 6px;
@@ -51,12 +70,16 @@
 .pc-picked-stock { font-family: var(--mono); font-size: 13px; margin-top: 4px; }
 .pc-picked-reg { font-size: 17px; }
 
-.pc-qty-row { display: flex; gap: 10px; }
+.pc-qty-row { display: flex; gap: 10px; align-items: stretch; }
 .pc-qty-row input {
-  width: 110px; flex-shrink: 0; font-size: 20px; text-align: center;
+  flex: 1; min-width: 0; font-size: 22px; text-align: center;
   font-family: var(--mono); font-weight: 700;
 }
-.pc-log { flex: 1; font-size: 16px; padding: 12px; }
+.qty-step {
+  flex-shrink: 0; width: 52px; font-size: 22px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
+.pc-log { width: 100%; font-size: 17px; padding: 14px; }
 
 @media (max-width: 480px) {
   .pc-main { padding-top: 12px; }

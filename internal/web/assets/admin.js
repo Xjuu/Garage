@@ -283,10 +283,11 @@ function whenLocalShort(iso) {
 }
 
 async function loadPartsAdmin() {
-  const [ips, devices, takes] = await Promise.all([
+  const [ips, devices, takes, catalog] = await Promise.all([
     api('/api/admin/parts-ips'),
     api('/api/admin/parts-devices'),
     api('/api/admin/parts-takes'),
+    api('/api/admin/parts-catalog'),
   ]);
 
   $('pi-rows').innerHTML = ips.length
@@ -327,7 +328,37 @@ async function loadPartsAdmin() {
           <td class="num">${int(t.quantity)}</td>
           <td class="mono truncate">${dash(t.device_name)}</td></tr>`).join('')
     : '<tr><td colspan="5" class="empty">Nothing logged yet</td></tr>';
+
+  $('pc-rows').innerHTML = catalog.length
+    ? catalog.map((p) => `
+        <tr><td><span class="part">${esc(p.part_number)}</span></td>
+          <td>${dash(p.description)}</td>
+          <td class="num">${int(p.starting_stock)}</td>
+          <td class="mono">${whenLocalShort(p.created_at)}</td>
+          <td><button class="btn sm danger" data-part="${esc(p.part_number)}">Remove</button></td></tr>`).join('')
+    : '<tr><td colspan="5" class="empty">No part added by hand yet — search only finds invoiced parts</td></tr>';
+  $('pc-rows').querySelectorAll('button[data-part]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      try {
+        await api('/api/admin/parts-catalog?part=' + encodeURIComponent(b.dataset.part), { method: 'DELETE' });
+        loadPartsAdmin();
+      } catch (e) { toast(e.message, true); }
+    }));
 }
+
+$('pc-add').addEventListener('click', async () => {
+  const part_number = $('pc-num').value.trim();
+  if (!part_number) { $('pc-num').focus(); return; }
+  try {
+    await api('/api/admin/parts-catalog', {
+      method: 'POST',
+      json: { part_number, description: $('pc-desc').value.trim(), starting_stock: Number($('pc-stock').value) || 0 },
+    });
+    $('pc-num').value = ''; $('pc-desc').value = ''; $('pc-stock').value = '0';
+    toast('Part added');
+    loadPartsAdmin();
+  } catch (e) { toast(e.message, true); }
+});
 
 $('pi-add').addEventListener('click', async () => {
   const ip = $('pi-ip').value.trim();
