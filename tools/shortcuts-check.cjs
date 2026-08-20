@@ -27,10 +27,22 @@ const clicks = []; // records which stub element .click() actually fired on
 
 function el(id) {
   const listeners = {};
+  // A real Set-backed classList, not a static stub: the drawer-open checks
+  // below need add()/remove() to actually change what contains() reports,
+  // or a real bug — closeDrawer() supposedly closing the drawer, but the
+  // capture-phase check running after it already sees it as closed and goes
+  // back on top of the close — would pass this harness by coincidence
+  // rather than by the ordering actually being right.
+  const classes = new Set();
   return {
     id, textContent: '', innerHTML: '', value: '', hidden: hiddenIds.has(id),
     dataset: {}, style: {},
-    classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
+    classList: {
+      add: (c) => classes.add(c),
+      remove: (c) => classes.delete(c),
+      toggle: (c, on) => { (on ?? !classes.has(c)) ? classes.add(c) : classes.delete(c); },
+      contains: (c) => classes.has(c),
+    },
     addEventListener(ev, fn) { (listeners[ev] ??= []).push(fn); },
     click() { clicks.push(id); (listeners.click || []).forEach((fn) => fn({})); },
     setAttribute() {}, removeAttribute() {},
@@ -47,7 +59,16 @@ ids.forEach((i) => { store[i] = el(i); });
   .forEach((i) => { store[i] ??= el(i); });
 
 let activeElement = { tagName: 'BODY', isContentEditable: false };
-const docHandlers = {};
+// Capture-phase and bubble-phase listeners on the same target (document, in
+// every case here) fire in two separate passes in a real browser — all
+// capture-phase listeners first, in registration order, then all
+// bubble-phase ones — regardless of which was registered first in the
+// source. Tracking them in one flat list and calling it in registration
+// order would only happen to get this right if the source order matched;
+// modelling the two phases properly is what makes the ordering assertions
+// below trustworthy rather than a coincidence of file layout.
+const docCapture = {};
+const docBubble = {};
 const errors = [];
 
 const ctx = vm.createContext({
@@ -55,7 +76,9 @@ const ctx = vm.createContext({
   document: {
     getElementById: (id) => store[id] || null,
     querySelectorAll: () => [], querySelector: () => null,
-    addEventListener(ev, fn) { (docHandlers[ev] ??= []).push(fn); },
+    addEventListener(ev, fn, capture) {
+      ((capture ? docCapture : docBubble)[ev] ??= []).push(fn);
+    },
     createElement: () => el('tmp'), body: el('body'), cookie: '',
     get activeElement() { return activeElement; },
   },
@@ -82,15 +105,19 @@ if (errors.length) {
   process.exit(1);
 }
 
-// Spy on show() the way the real nav click-handler calls it, so a shortcut
-// can be confirmed to have asked for the right view without needing the
-// rest of the render pipeline (view sections, tab highlighting, ...) wired up.
+// Wrapping, not replacing: goBack()'s history bookkeeping lives inside the
+// real show(), so a check that needs goBack() to actually work (popping
+// viewHistory, restoring the previous view) needs the real function to keep
+// running — a spy that swallows the call the way the tab-shortcut checks
+// only needed would silently break that.
+const realShow = ctx.show;
 const shown = [];
-ctx.show = (view) => shown.push(view);
+ctx.show = (view) => { shown.push(view); return realShow(view); };
 
 function press(key, opts = {}) {
   const e = { key, metaKey: false, ctrlKey: false, altKey: false, ...opts, preventDefault() {} };
-  (docHandlers.keydown || []).forEach((fn) => fn(e));
+  (docCapture.keydown || []).forEach((fn) => fn(e));
+  (docBubble.keydown || []).forEach((fn) => fn(e));
 }
 
 let failed = 0;
@@ -138,17 +165,65 @@ check('Ctrl-S does not trigger sync (leaves the browser shortcut alone)', clicks
 // 5. An open drawer or dialog must suppress the tab-switching shortcuts —
 //    jumping away from an open invoice or a half-filled dialog would lose
 //    more than the key saves.
-store['drawer'].classList.contains = () => true; // simulate an open drawer
+store['drawer'].classList.add('open'); // simulate an open drawer
 shown.length = 0;
 press('1');
 check('tab shortcuts are suppressed while the drawer is open', shown.length === 0);
-store['drawer'].classList.contains = () => false;
+// '1' isn't Escape, so nothing in the real code closes the drawer here —
+// clear it explicitly, or the next section's checks would see a drawer
+// that looks open for a reason that has nothing to do with what they are
+// testing, the same leftover-state mistake the Return fix's test caught
+// earlier in this file's history.
+store['drawer'].classList.remove('open');
 
 store['gen-modal'].hidden = false; // simulate the Generate dialog being open
 clicks.length = 0;
 press('g');
 check('shortcuts are suppressed while the Generate dialog is open', clicks.length === 0);
 store['gen-modal'].hidden = true;
+
+// 6. Escape steps back through the real view history built by test 1's
+//    presses of 1→2→3→4 (overview → invoices → spending → fleet), so this
+//    walks it back down: fleet → spending → invoices → overview → (nothing
+//    left, no-op). Using the real show(), not the spy alone, is exactly why
+//    it was wrapped rather than replaced — goBack()'s bookkeeping lives
+//    inside it.
+for (const want of ['spending', 'invoices', 'overview']) {
+  shown.length = 0;
+  press('Escape');
+  check(`Escape steps back to ${want}`, shown[shown.length - 1] === want);
+}
+
+// 7. With nothing left in history, Escape is a no-op rather than an error —
+//    Overview is home; there is nowhere further back to go.
+shown.length = 0;
+press('Escape');
+check('Escape with empty history does nothing', shown.length === 0);
+
+// 8. Escape must close an open overlay instead of going back — one press,
+//    one action. Rebuild a little history first so there would be
+//    somewhere to go back to if the guard were missing.
+press('1'); press('2'); // history now has at least one entry again
+
+store['drawer'].classList.add('open');
+shown.length = 0;
+press('Escape');
+check('Escape does not go back while the drawer is open (closes it instead)', shown.length === 0);
+// Unlike the '1' case above, this Escape press genuinely runs the real
+// closeDrawer() (a separate bubble-phase handler, unconditional on the key
+// being Escape), which really does clear 'open' — nothing to reset by hand.
+
+store['gen-modal'].hidden = false;
+shown.length = 0;
+press('Escape');
+check('Escape does not go back while the Generate dialog is open', shown.length === 0);
+store['gen-modal'].hidden = true;
+
+store['omni-results'].hidden = false; // simulate the search dropdown showing
+shown.length = 0;
+press('Escape');
+check('Escape does not go back while the search dropdown is open', shown.length === 0);
+store['omni-results'].hidden = true;
 
 if (failed) {
   console.log(`\n${failed} check(s) failed.`);

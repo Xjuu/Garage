@@ -144,7 +144,23 @@ function buildNav() {
     b.addEventListener('click', () => show(b.dataset.view)));
 }
 
+// Every view actually shown gets remembered, so Escape can step back through
+// it — same idea as a browser's back button, scoped to this one page. Capped
+// so leaving the dashboard open for days doesn't grow this forever; nobody
+// backs up more than a handful of steps in practice.
+const viewHistory = [];
+const VIEW_HISTORY_LIMIT = 30;
+// Set while goBack() itself is calling show(), so that call doesn't push the
+// view being left back onto the history it was just popped from — without
+// this, Escape would step back one view and then be stuck bouncing between
+// the last two forever instead of walking further back.
+let navigatingBack = false;
+
 function show(view) {
+  if (!navigatingBack && state.view && state.view !== view) {
+    viewHistory.push(state.view);
+    if (viewHistory.length > VIEW_HISTORY_LIMIT) viewHistory.shift();
+  }
   state.view = view;
   const group = groupOf[view] || 'overview';
 
@@ -159,6 +175,16 @@ function show(view) {
   document.querySelectorAll('.view').forEach((s) =>
     s.classList.toggle('active', s.id === 'view-' + view));
   loadView(view);
+}
+
+/** Steps back to whichever view was showing before the current one. A no-op
+    on Overview with nothing behind it — there is nothing to go back to. */
+function goBack() {
+  const prev = viewHistory.pop();
+  if (!prev) return;
+  navigatingBack = true;
+  show(prev);
+  navigatingBack = false;
 }
 
 // Mutable so the fleet, training and admin modules can register their own
@@ -454,6 +480,28 @@ function showDrawerFooter(mode) {
 $('d-close').addEventListener('click', closeDrawer);
 $('scrim').addEventListener('click', closeDrawer);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
+
+// Escape already closes whatever overlay is open — the drawer above, a
+// modal, the search dropdown. When none of those are open, the same key
+// steps back to the previous view instead, the way a browser's back button
+// would. One Escape press does one thing: close the topmost thing on
+// screen, or if there is nothing to close, go back — never both at once.
+//
+// Registered on the capture phase specifically, so it runs and reads this
+// state BEFORE the handlers above have acted on the very same keystroke. A
+// bubble-phase check here would run after closeDrawer() and the others had
+// already closed everything, see their already-closed state, wrongly
+// conclude nothing was open, and go back on top of the close.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const somethingOpen =
+    $('drawer').classList.contains('open') ||
+    !$('gen-modal').hidden ||
+    !$('files-modal').hidden ||
+    !$('omni-results').hidden;
+  if (somethingOpen) return;
+  goBack();
+}, true);
 
 // ── keyboard shortcuts ───────────────────────────────────────────────────
 // The handful of actions worth a key of their own: the two most-clicked
