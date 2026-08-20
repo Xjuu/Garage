@@ -194,6 +194,17 @@ type Vehicle struct {
 	Brutto       float64 `json:"brutto"`
 	FirstSeen    string  `json:"first_seen"`
 	LastSeen     string  `json:"last_seen"`
+
+	// Spec fields learned from repairs.<domain> visits (see UpdateVehicleSpec)
+	// — blank until a repair entry has ever supplied one.
+	VIN              string `json:"vin"`
+	Colour           string `json:"colour"`
+	CylinderCapacity string `json:"cylinder_capacity"`
+	FuelType         string `json:"fuel_type"`
+	EngineSize       string `json:"engine_size"`
+	TyreSize         string `json:"tyre_size"`
+	RadioCode        string `json:"radio_code"`
+	SpareKeys        string `json:"spare_keys"`
 }
 
 const vehicleSelect = `
@@ -201,7 +212,9 @@ const vehicleSelect = `
 	       v.make, v.model, v.year, v.driver, v.notes, v.active,
 	       COUNT(i.id),
 	       COALESCE(SUM(i.netto),0), COALESCE(SUM(i.vat_amount),0), COALESCE(SUM(i.brutto),0),
-	       COALESCE(MIN(NULLIF(i.invoice_date,'')),''), COALESCE(MAX(NULLIF(i.invoice_date,'')),'')
+	       COALESCE(MIN(NULLIF(i.invoice_date,'')),''), COALESCE(MAX(NULLIF(i.invoice_date,'')),''),
+	       v.vin, v.colour, v.cylinder_capacity, v.fuel_type, v.engine_size, v.tyre_size,
+	       v.radio_code, v.spare_keys
 	FROM vehicles v
 	LEFT JOIN companies c ON c.id = v.company_id
 	LEFT JOIN invoices i  ON i.vehicle_reg = v.registration`
@@ -212,7 +225,9 @@ func scanVehicle(sc scanner) (*Vehicle, error) {
 	var active int
 	if err := sc.Scan(&v.Registration, &companyID, &v.CompanyName, &v.Make, &v.Model,
 		&v.Year, &v.Driver, &v.Notes, &active, &v.Invoices,
-		&v.Netto, &v.VAT, &v.Brutto, &v.FirstSeen, &v.LastSeen); err != nil {
+		&v.Netto, &v.VAT, &v.Brutto, &v.FirstSeen, &v.LastSeen,
+		&v.VIN, &v.Colour, &v.CylinderCapacity, &v.FuelType, &v.EngineSize, &v.TyreSize,
+		&v.RadioCode, &v.SpareKeys); err != nil {
 		return nil, err
 	}
 	if companyID.Valid {
@@ -398,6 +413,14 @@ type VehicleStats struct {
 	Invoices     []Invoice     `json:"invoices"`
 	AvgPerMonth  float64       `json:"avg_per_month"`
 	MonthsActive int           `json:"months_active"`
+
+	// Repairs is this vehicle's service history logged from
+	// repairs.<domain>. LastTimingBelt is tracked separately from the rest
+	// of that history — a workshop watches a belt's interval on its own,
+	// not lumped in with every other kind of visit.
+	Repairs        []Repair `json:"repairs"`
+	LastTimingBelt string   `json:"last_timing_belt"`
+	HasTimingBelt  bool     `json:"has_timing_belt"`
 }
 
 func (s *Store) VehicleStats(reg string) (*VehicleStats, error) {
@@ -418,6 +441,12 @@ func (s *Store) VehicleStats(reg string) (*VehicleStats, error) {
 		return nil, err
 	}
 	if out.Invoices, err = s.invoicesWhere(`i.vehicle_reg = ?`, reg); err != nil {
+		return nil, err
+	}
+	if out.Repairs, err = s.ListRepairsForVehicle(reg); err != nil {
+		return nil, err
+	}
+	if out.LastTimingBelt, out.HasTimingBelt, err = s.LastTimingBeltChange(reg); err != nil {
 		return nil, err
 	}
 

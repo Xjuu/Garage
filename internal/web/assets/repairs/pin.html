@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Repairs log — Sign in</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='black'/><text x='16' y='23' font-size='20' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>R</text></svg>">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="brand"><span class="brand-mark">R</span> Repairs log</div>
+    <p class="sub">Enter the shared 6-digit code to log a service or repair.</p>
+
+    <form id="form">
+      <div class="field">
+        <label for="code">6-digit code</label>
+        <input type="text" id="code" inputmode="numeric" pattern="[0-9]*"
+               autocomplete="one-time-code" maxlength="6" required autofocus
+               placeholder="000000">
+      </div>
+      <button class="btn solid" type="submit" id="submit">Continue</button>
+      <div class="login-err" id="err" role="alert"></div>
+    </form>
+  </div>
+</div>
+<script src="/static/repairs/pin.js"></script>
+</body>
+</html>

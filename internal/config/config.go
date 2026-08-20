@@ -77,6 +77,11 @@ type Config struct {
 	// the app over loopback, so binding to 127.0.0.1 is no evidence at all
 	// that the site is private.
 	AllowNoPassword bool
+
+	// RepairsPIN gates repairs.<domain> — a shared code, not a per-account
+	// password, since it's one small crew logging a service on a shared
+	// device rather than individual named users.
+	RepairsPIN string
 }
 
 // Load reads .env files (first found wins) then overlays real environment
@@ -114,6 +119,7 @@ func Load() (*Config, error) {
 		PasswordHash:    envStr("GOLDSTAR_PASSWORD_HASH", ""),
 		CookieSecure:    envBool("GOLDSTAR_COOKIE_SECURE", false),
 		AllowNoPassword: envBool("GOLDSTAR_ALLOW_NO_PASSWORD", false),
+		RepairsPIN:      envStr("GOLDSTAR_REPAIRS_PIN", ""),
 	}
 
 	// Mailbox settings saved from the admin page override the .env file, since
@@ -152,6 +158,11 @@ func Load() (*Config, error) {
 	if b, err := os.ReadFile(c.TOTPFilePath()); err == nil {
 		if v := bytes.TrimSpace(b); len(v) > 0 {
 			c.TOTPSecret = string(v)
+		}
+	}
+	if b, err := os.ReadFile(c.RepairsPINFilePath()); err == nil {
+		if v := bytes.TrimSpace(b); len(v) > 0 {
+			c.RepairsPIN = string(v)
 		}
 	}
 	return c, nil
@@ -215,6 +226,26 @@ func (c *Config) ClearTOTPSecret() error {
 // SessionKeyPath holds the HMAC key that signs session cookies. Deleting this
 // file logs everyone out.
 func (c *Config) SessionKeyPath() string { return filepath.Join(c.DataDir, "session.key") }
+
+// RepairsPINFilePath holds a PIN set from the admin page, overriding .env —
+// same reasoning as PasswordFilePath: a value set from the dashboard is the
+// more recent deliberate choice.
+func (c *Config) RepairsPINFilePath() string { return filepath.Join(c.DataDir, "repairs.pin") }
+
+// WriteRepairsPIN persists a new repairs-site PIN, replacing any earlier one.
+func (c *Config) WriteRepairsPIN(pin string) error {
+	if err := os.MkdirAll(c.DataDir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(c.RepairsPINFilePath(), []byte(strings.TrimSpace(pin)+"\n"), 0o600)
+}
+
+// RepairsSessionKeyPath holds the HMAC key that signs repairs.<domain>
+// device cookies — entirely separate from SessionKeyPath, so nothing about
+// the dashboard's own sessions is affected by rotating this one.
+func (c *Config) RepairsSessionKeyPath() string {
+	return filepath.Join(c.DataDir, "repairs-session.key")
+}
 
 // LoopbackOnly reports whether WEB_ADDR is bound to localhost. A dashboard
 // without a password may only ever listen there.

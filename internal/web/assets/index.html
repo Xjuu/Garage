@@ -340,6 +340,13 @@
       <button class="btn sm" id="veh-spending">Spending trend →</button>
     </div>
     <div class="tiles" id="veh-tiles"></div>
+    <!-- Learned from repairs.<domain> visits — hidden entirely until at
+         least one visit has supplied something, rather than showing a wall
+         of empty fields for a vehicle with no repair history yet. -->
+    <div id="veh-spec-section" hidden>
+      <div class="section-title">Vehicle details</div>
+      <div class="panel" style="padding:14px 16px;font-size:13px;line-height:1.9" id="veh-spec"></div>
+    </div>
     <div class="section-title">Spend by month</div>
     <div class="panel" style="padding:16px 18px"><div id="veh-bars"></div></div>
     <div class="grid2" style="align-items:start;margin-top:22px">
@@ -361,6 +368,12 @@
       <thead><tr><th>Date</th><th>Supplier</th><th>Invoice no.</th>
         <th class="num">Net</th><th class="num">VAT</th><th class="num">Gross</th></tr></thead>
       <tbody id="veh-invoices"></tbody></table></div></div>
+
+    <div class="section-title">Repairs &amp; servicing</div>
+    <div class="panel"><div class="table-scroll"><table>
+      <thead><tr><th>Date</th><th>Service</th><th class="num">Mileage</th>
+        <th>Timing belt</th><th>Description</th></tr></thead>
+      <tbody id="veh-repairs"></tbody></table></div></div>
   </section>
 
   <!-- Part detail -->
@@ -572,6 +585,31 @@
         <button class="btn" id="vacuum-db">Compact database</button>
       </div>
     </div>
+
+    <div class="section-title">Repairs log — access</div>
+    <div class="panel" style="padding:16px 18px;margin-bottom:18px">
+      <div class="m" style="color:var(--g4);font-size:12px;margin-bottom:12px">
+        repairs.&lt;your domain&gt; is gated by this shared 6-digit code. Anyone
+        with the code can log a repair from a browser that remembers their
+        device until it's revoked below.
+      </div>
+      <div class="grid2" style="margin-bottom:12px">
+        <div class="field"><label for="rp-pin">New 6-digit code</label>
+          <input type="text" id="rp-pin" inputmode="numeric" maxlength="12" autocomplete="off"></div>
+      </div>
+      <button class="btn solid" id="rp-save">Change code</button>
+      <div id="rp-result" style="font-size:13px;margin-top:10px"></div>
+    </div>
+
+    <div class="section-title">Repairs log — devices</div>
+    <div class="panel"><div class="table-scroll"><table>
+      <thead><tr><th>Device</th><th>First seen</th><th>Last seen</th><th>Status</th><th></th></tr></thead>
+      <tbody id="rd-rows"></tbody></table></div></div>
+
+    <div class="section-title">Repairs log — recent activity</div>
+    <div class="panel"><div class="table-scroll"><table>
+      <thead><tr><th>When</th><th>Vehicle</th><th>Service</th><th class="num">Mileage</th><th>Device</th></tr></thead>
+      <tbody id="rt-rows"></tbody></table></div></div>
 
     <!-- TEMP: a quick way to see what the server has been doing without SSH
          access. Remove this section, its loadLogs()/setInterval in admin.js

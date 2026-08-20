@@ -144,18 +144,78 @@ CREATE TABLE IF NOT EXISTS companies (
 -- Keyed on the normalised registration (upper case, no spaces), which is the
 -- same form invoices.vehicle_reg is stored in, so the two always join.
 CREATE TABLE IF NOT EXISTS vehicles (
-  registration TEXT PRIMARY KEY,
-  company_id   INTEGER REFERENCES companies(id) ON DELETE SET NULL,
-  make         TEXT NOT NULL DEFAULT '',
-  model        TEXT NOT NULL DEFAULT '',
-  year         TEXT NOT NULL DEFAULT '',
-  driver       TEXT NOT NULL DEFAULT '',
-  notes        TEXT NOT NULL DEFAULT '',
-  active       INTEGER NOT NULL DEFAULT 1,
-  created_at   TEXT NOT NULL
+  registration      TEXT PRIMARY KEY,
+  company_id        INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+  make              TEXT NOT NULL DEFAULT '',
+  model             TEXT NOT NULL DEFAULT '',
+  year              TEXT NOT NULL DEFAULT '',
+  driver            TEXT NOT NULL DEFAULT '',
+  notes             TEXT NOT NULL DEFAULT '',
+  active            INTEGER NOT NULL DEFAULT 1,
+  -- The rest are spec facts a repair entry fills in as it learns them
+  -- (see UpdateVehicleSpec) — kept here too so the registry always shows
+  -- the latest known values, not just whatever the most recent repair row
+  -- happened to record.
+  vin               TEXT NOT NULL DEFAULT '',
+  colour            TEXT NOT NULL DEFAULT '',
+  cylinder_capacity TEXT NOT NULL DEFAULT '',
+  fuel_type         TEXT NOT NULL DEFAULT '',
+  engine_size       TEXT NOT NULL DEFAULT '',
+  tyre_size         TEXT NOT NULL DEFAULT '',
+  radio_code        TEXT NOT NULL DEFAULT '',
+  spare_keys        TEXT NOT NULL DEFAULT '',
+  created_at        TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_vehicles_company ON vehicles(company_id);
+
+-- Repairs ---------------------------------------------------------------
+
+-- One row per service/repair visit, logged from repairs.<domain>. Vehicle
+-- spec fields are captured here too (not just on vehicles) so a repair row
+-- is a complete, self-contained record of what was true and entered at
+-- that visit — important for the historical CSV import this is meant to
+-- receive, which will arrive as one row per visit, not a separate vehicle
+-- master sheet.
+CREATE TABLE IF NOT EXISTS repairs (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  vehicle_reg         TEXT NOT NULL,
+  service_date        TEXT NOT NULL,
+  service_type        TEXT NOT NULL DEFAULT '', -- "full", "mini", or "other"
+  service_type_other  TEXT NOT NULL DEFAULT '', -- free text when service_type = "other"
+  mileage             REAL,
+  -- Its own yes/no, deliberately not folded into description — but it
+  -- shares service_date, the one date both a "last repair" and a "last
+  -- timing belt change" reading are computed from.
+  timing_belt_changed INTEGER NOT NULL DEFAULT 0,
+  description         TEXT NOT NULL DEFAULT '',
+  vin                 TEXT NOT NULL DEFAULT '',
+  make                TEXT NOT NULL DEFAULT '',
+  model               TEXT NOT NULL DEFAULT '',
+  colour              TEXT NOT NULL DEFAULT '',
+  cylinder_capacity   TEXT NOT NULL DEFAULT '',
+  spare_keys          TEXT NOT NULL DEFAULT '',
+  fuel_type           TEXT NOT NULL DEFAULT '',
+  engine_size         TEXT NOT NULL DEFAULT '',
+  tyre_size           TEXT NOT NULL DEFAULT '',
+  radio_code          TEXT NOT NULL DEFAULT '',
+  oil_amount          TEXT NOT NULL DEFAULT '',
+  device_id           TEXT NOT NULL DEFAULT '',
+  created_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_repairs_reg ON repairs(vehicle_reg);
+
+-- A device that has typed the correct repairs PIN once — same shape and
+-- same reasoning as parts_devices before it: revoking access means
+-- deactivating the row here, not rotating a shared key that would sign
+-- every device out at once instead of one.
+CREATE TABLE IF NOT EXISTS repairs_devices (
+  id          TEXT PRIMARY KEY,
+  label       TEXT NOT NULL DEFAULT '',
+  active      INTEGER NOT NULL DEFAULT 1,
+  first_seen  TEXT NOT NULL,
+  last_seen   TEXT NOT NULL
+);
 
 -- Training ------------------------------------------------------------------
 
@@ -246,21 +306,35 @@ func Open(path string) (*Store, error) {
 // CREATE TABLE IF NOT EXISTS silently leaves an existing table alone, so new
 // columns have to be added explicitly or upgrades break on the old schema.
 func migrate(db *sql.DB) error {
-	added := map[string]string{
-		"is_general": "ALTER TABLE invoices ADD COLUMN is_general INTEGER NOT NULL DEFAULT 0",
-		"returned":   "ALTER TABLE invoices ADD COLUMN returned INTEGER NOT NULL DEFAULT 0",
-		"credit_of":  "ALTER TABLE invoices ADD COLUMN credit_of INTEGER REFERENCES invoices(id)",
+	tables := map[string]map[string]string{
+		"invoices": {
+			"is_general": "ALTER TABLE invoices ADD COLUMN is_general INTEGER NOT NULL DEFAULT 0",
+			"returned":   "ALTER TABLE invoices ADD COLUMN returned INTEGER NOT NULL DEFAULT 0",
+			"credit_of":  "ALTER TABLE invoices ADD COLUMN credit_of INTEGER REFERENCES invoices(id)",
+		},
+		"vehicles": {
+			"vin":               "ALTER TABLE vehicles ADD COLUMN vin TEXT NOT NULL DEFAULT ''",
+			"colour":            "ALTER TABLE vehicles ADD COLUMN colour TEXT NOT NULL DEFAULT ''",
+			"cylinder_capacity": "ALTER TABLE vehicles ADD COLUMN cylinder_capacity TEXT NOT NULL DEFAULT ''",
+			"fuel_type":         "ALTER TABLE vehicles ADD COLUMN fuel_type TEXT NOT NULL DEFAULT ''",
+			"engine_size":       "ALTER TABLE vehicles ADD COLUMN engine_size TEXT NOT NULL DEFAULT ''",
+			"tyre_size":         "ALTER TABLE vehicles ADD COLUMN tyre_size TEXT NOT NULL DEFAULT ''",
+			"radio_code":        "ALTER TABLE vehicles ADD COLUMN radio_code TEXT NOT NULL DEFAULT ''",
+			"spare_keys":        "ALTER TABLE vehicles ADD COLUMN spare_keys TEXT NOT NULL DEFAULT ''",
+		},
 	}
-	have, err := columns(db, "invoices")
-	if err != nil {
-		return err
-	}
-	for col, stmt := range added {
-		if have[col] {
-			continue
+	for table, added := range tables {
+		have, err := columns(db, table)
+		if err != nil {
+			return err
 		}
-		if _, err := db.Exec(stmt); err != nil {
-			return fmt.Errorf("add %s: %w", col, err)
+		for col, stmt := range added {
+			if have[col] {
+				continue
+			}
+			if _, err := db.Exec(stmt); err != nil {
+				return fmt.Errorf("add %s.%s: %w", table, col, err)
+			}
 		}
 	}
 	return nil

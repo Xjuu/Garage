@@ -102,6 +102,19 @@ async function loadVehicleDetail() {
   $('veh-invoices').querySelectorAll('tr[data-id]').forEach((tr) =>
     tr.addEventListener('click', () => openInvoice(tr.dataset.id)));
 
+  renderVehicleSpec(v, d.last_timing_belt, d.has_timing_belt);
+
+  $('veh-repairs').innerHTML = (d.repairs || []).length
+    ? d.repairs.map((r) => `
+        <tr>
+          <td class="mono">${dash(r.service_date)}</td>
+          <td>${esc(serviceTypeLabel(r))}</td>
+          <td class="num">${r.mileage ? int(r.mileage) : '—'}</td>
+          <td>${r.timing_belt_changed ? '<span class="pill">Changed</span>' : ''}</td>
+          <td class="truncate" title="${esc(r.description)}">${dash(r.description)}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="5" class="empty">No repairs logged</td></tr>';
+
   // An offer, not an automatic jump: opening a vehicle used to silently
   // carry no filter over to Invoices at all — filterByVehicle already
   // existed to do it, it just had nothing wired up to call it. Landing on
@@ -113,6 +126,32 @@ async function loadVehicleDetail() {
     actionToast(`Show only ${v.registration}'s invoices?`, 'Show invoices',
       () => filterByVehicle(v.registration));
   }
+}
+
+function serviceTypeLabel(r) {
+  if (r.service_type === 'other') return r.service_type_other || 'Other';
+  return r.service_type === 'full' ? 'Full service' : 'Mini service';
+}
+
+// Every spec field is optional and only ever arrives once a repair visit
+// has supplied it — the whole panel stays hidden until at least one exists,
+// rather than showing a vehicle's page full of empty "—" rows by default.
+function renderVehicleSpec(v, lastTimingBelt, hasTimingBelt) {
+  const rows = [
+    ['VIN / chassis number', v.vin],
+    ['Colour', v.colour],
+    ['Cylinder capacity', v.cylinder_capacity],
+    ['Fuel type', v.fuel_type],
+    ['Engine size', v.engine_size],
+    ['Tyre size', v.tyre_size],
+    ['Radio code', v.radio_code],
+    ['Spare keys', v.spare_keys],
+    ['Last timing belt change', hasTimingBelt ? lastTimingBelt : ''],
+  ].filter(([, val]) => val);
+
+  $('veh-spec-section').hidden = rows.length === 0;
+  $('veh-spec').innerHTML = rows.map(([k, val]) =>
+    `<div><span class="muted">${esc(k)}</span> ${esc(val)}</div>`).join('');
 }
 
 // ── part detail ───────────────────────────────────────────────────────────

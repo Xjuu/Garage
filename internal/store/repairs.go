@@ -1,0 +1,325 @@
+package store
+
+import (
+	"database/sql"
+	"fmt"
+	"strings"
+)
+
+// ── repairs ──────────────────────────────────────────────────────────────
+
+// Repair is one service/repair visit logged from repairs.<domain>.
+type Repair struct {
+	ID                int64   `json:"id"`
+	VehicleReg        string  `json:"vehicle_reg"`
+	ServiceDate       string  `json:"service_date"`
+	ServiceType       string  `json:"service_type"`       // "full", "mini", or "other"
+	ServiceTypeOther  string  `json:"service_type_other"` // free text when ServiceType == "other"
+	Mileage           float64 `json:"mileage"`
+	TimingBeltChanged bool    `json:"timing_belt_changed"`
+	Description       string  `json:"description"`
+	VIN               string  `json:"vin"`
+	Make              string  `json:"make"`
+	Model             string  `json:"model"`
+	Colour            string  `json:"colour"`
+	CylinderCapacity  string  `json:"cylinder_capacity"`
+	SpareKeys         string  `json:"spare_keys"`
+	FuelType          string  `json:"fuel_type"`
+	EngineSize        string  `json:"engine_size"`
+	TyreSize          string  `json:"tyre_size"`
+	RadioCode         string  `json:"radio_code"`
+	OilAmount         string  `json:"oil_amount"`
+	DeviceID          string  `json:"device_id,omitempty"`
+	DeviceName        string  `json:"device_name,omitempty"`
+	CreatedAt         string  `json:"created_at"`
+}
+
+var serviceTypes = map[string]bool{"full": true, "mini": true, "other": true}
+
+// LogRepair records one visit and folds whatever vehicle-spec fields it
+// carries (make, model, VIN, colour, ...) into the vehicle's registry row,
+// so the latest known spec is visible everywhere else in the dashboard too,
+// not just buried in this one visit's record.
+func (s *Store) LogRepair(r Repair, deviceID string) (int64, error) {
+	reg := NormalizeReg(r.VehicleReg)
+	if reg == "" {
+		return 0, fmt.Errorf("vehicle registration is required")
+	}
+	r.ServiceType = strings.ToLower(strings.TrimSpace(r.ServiceType))
+	if !serviceTypes[r.ServiceType] {
+		return 0, fmt.Errorf("service type must be full, mini, or other")
+	}
+	if r.ServiceType == "other" && strings.TrimSpace(r.ServiceTypeOther) == "" {
+		return 0, fmt.Errorf("describe the service type when \"other\" is selected")
+	}
+	if r.ServiceType != "other" {
+		r.ServiceTypeOther = ""
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(`
+		INSERT INTO repairs (
+			vehicle_reg, service_date, service_type, service_type_other, mileage,
+			timing_belt_changed, description, vin, make, model, colour,
+			cylinder_capacity, spare_keys, fuel_type, engine_size, tyre_size,
+			radio_code, oil_amount, device_id, created_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		reg, now(), r.ServiceType, r.ServiceTypeOther, r.Mileage,
+		boolToInt(r.TimingBeltChanged), strings.TrimSpace(r.Description),
+		strings.TrimSpace(r.VIN), strings.TrimSpace(r.Make), strings.TrimSpace(r.Model),
+		strings.TrimSpace(r.Colour), strings.TrimSpace(r.CylinderCapacity),
+		strings.TrimSpace(r.SpareKeys), strings.TrimSpace(r.FuelType),
+		strings.TrimSpace(r.EngineSize), strings.TrimSpace(r.TyreSize),
+		strings.TrimSpace(r.RadioCode), strings.TrimSpace(r.OilAmount),
+		deviceID, now())
+	if err != nil {
+		return 0, fmt.Errorf("insert repair: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	if err := ensureVehicleRegistered(tx, reg); err != nil {
+		return 0, fmt.Errorf("register vehicle: %w", err)
+	}
+	if err := updateVehicleSpecTx(tx, reg, VehicleSpecPatch{
+		Make: r.Make, Model: r.Model, VIN: r.VIN, Colour: r.Colour,
+		CylinderCapacity: r.CylinderCapacity, FuelType: r.FuelType,
+		EngineSize: r.EngineSize, TyreSize: r.TyreSize,
+		RadioCode: r.RadioCode, SpareKeys: r.SpareKeys,
+	}); err != nil {
+		return 0, fmt.Errorf("update vehicle spec: %w", err)
+	}
+
+	return id, tx.Commit()
+}
+
+// ListRepairsForVehicle is the service history for one car, newest first —
+// used both by the worker app (type a reg, see what's been done before)
+// and the dashboard's vehicle drawer.
+func (s *Store) ListRepairsForVehicle(reg string) ([]Repair, error) {
+	reg = NormalizeReg(reg)
+	rows, err := s.db.Query(`
+		SELECT r.id, r.vehicle_reg, r.service_date, r.service_type, r.service_type_other,
+		       r.mileage, r.timing_belt_changed, r.description, r.vin, r.make, r.model,
+		       r.colour, r.cylinder_capacity, r.spare_keys, r.fuel_type, r.engine_size,
+		       r.tyre_size, r.radio_code, r.oil_amount, r.device_id,
+		       COALESCE(rd.label, ''), r.created_at
+		FROM repairs r
+		LEFT JOIN repairs_devices rd ON rd.id = r.device_id
+		WHERE r.vehicle_reg = ?
+		ORDER BY r.id DESC`, reg)
+	if err != nil {
+		return nil, err
+	}
+	return scanRepairs(rows)
+}
+
+// RecentRepairs is the admin audit view — every visit logged, across every
+// vehicle, newest first.
+func (s *Store) RecentRepairs(limit int) ([]Repair, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := s.db.Query(`
+		SELECT r.id, r.vehicle_reg, r.service_date, r.service_type, r.service_type_other,
+		       r.mileage, r.timing_belt_changed, r.description, r.vin, r.make, r.model,
+		       r.colour, r.cylinder_capacity, r.spare_keys, r.fuel_type, r.engine_size,
+		       r.tyre_size, r.radio_code, r.oil_amount, r.device_id,
+		       COALESCE(rd.label, ''), r.created_at
+		FROM repairs r
+		LEFT JOIN repairs_devices rd ON rd.id = r.device_id
+		ORDER BY r.id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	return scanRepairs(rows)
+}
+
+func scanRepairs(rows *sql.Rows) ([]Repair, error) {
+	defer rows.Close()
+	out := []Repair{}
+	for rows.Next() {
+		var r Repair
+		var beltChanged int
+		if err := rows.Scan(&r.ID, &r.VehicleReg, &r.ServiceDate, &r.ServiceType, &r.ServiceTypeOther,
+			&r.Mileage, &beltChanged, &r.Description, &r.VIN, &r.Make, &r.Model,
+			&r.Colour, &r.CylinderCapacity, &r.SpareKeys, &r.FuelType, &r.EngineSize,
+			&r.TyreSize, &r.RadioCode, &r.OilAmount, &r.DeviceID, &r.DeviceName, &r.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		r.TimingBeltChanged = beltChanged != 0
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// LastTimingBeltChange reports the most recent service_date among visits
+// that recorded a timing belt change for this vehicle — kept as its own
+// lookup because a workshop tracks a timing belt's interval separately from
+// "when was this car last seen at all".
+func (s *Store) LastTimingBeltChange(reg string) (date string, found bool, err error) {
+	reg = NormalizeReg(reg)
+	var d sql.NullString
+	err = s.db.QueryRow(`
+		SELECT MAX(service_date) FROM repairs WHERE vehicle_reg = ? AND timing_belt_changed = 1`, reg).
+		Scan(&d)
+	if err != nil {
+		return "", false, err
+	}
+	return d.String, d.Valid, nil
+}
+
+// SearchRepairVehicles finds registrations from the fleet registry — an
+// empty q matches everything, the "browse all" case the worker app's search
+// box supports the same way the (now-removed) parts counter's did.
+func (s *Store) SearchRepairVehicles(q string, limit int) ([]string, error) {
+	if limit <= 0 || limit > 300 {
+		limit = 100
+	}
+	q = strings.ToUpper(strings.TrimSpace(q))
+	like := "%" + q + "%"
+	rows, err := s.db.Query(`
+		SELECT registration FROM vehicles
+		WHERE registration LIKE ? ORDER BY registration LIMIT ?`, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []string{}
+	for rows.Next() {
+		var reg string
+		if err := rows.Scan(&reg); err != nil {
+			return nil, err
+		}
+		out = append(out, reg)
+	}
+	return out, rows.Err()
+}
+
+// ── vehicle spec ─────────────────────────────────────────────────────────
+
+// VehicleSpecPatch updates only the fields actually given — unlike
+// SaveVehicle's full upsert, a blank field here leaves whatever was already
+// on file alone, since a repair visit rarely fills in every spec field at
+// once and must never blank out ones a previous visit already recorded.
+type VehicleSpecPatch struct {
+	Make, Model, VIN, Colour                         string
+	CylinderCapacity, FuelType, EngineSize, TyreSize string
+	RadioCode, SpareKeys                             string
+}
+
+// UpdateVehicleSpec applies a partial spec update, registering the vehicle
+// first if this is the first time it's been seen.
+func (s *Store) UpdateVehicleSpec(reg string, p VehicleSpecPatch) error {
+	reg = NormalizeReg(reg)
+	if reg == "" {
+		return fmt.Errorf("registration is required")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := ensureVehicleRegistered(tx, reg); err != nil {
+		return err
+	}
+	if err := updateVehicleSpecTx(tx, reg, p); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func updateVehicleSpecTx(tx *sql.Tx, reg string, p VehicleSpecPatch) error {
+	var sets []string
+	var args []any
+	add := func(col, val string) {
+		if strings.TrimSpace(val) == "" {
+			return
+		}
+		sets = append(sets, col+" = ?")
+		args = append(args, strings.TrimSpace(val))
+	}
+	add("make", p.Make)
+	add("model", p.Model)
+	add("vin", p.VIN)
+	add("colour", p.Colour)
+	add("cylinder_capacity", p.CylinderCapacity)
+	add("fuel_type", p.FuelType)
+	add("engine_size", p.EngineSize)
+	add("tyre_size", p.TyreSize)
+	add("radio_code", p.RadioCode)
+	add("spare_keys", p.SpareKeys)
+	if len(sets) == 0 {
+		return nil
+	}
+	args = append(args, reg)
+	_, err := tx.Exec("UPDATE vehicles SET "+strings.Join(sets, ", ")+" WHERE registration = ?", args...)
+	return err
+}
+
+// ── devices ──────────────────────────────────────────────────────────────
+
+type RepairsDevice struct {
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	Active    bool   `json:"active"`
+	FirstSeen string `json:"first_seen"`
+	LastSeen  string `json:"last_seen"`
+}
+
+func (s *Store) RegisterRepairsDevice(id, label string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO repairs_devices (id, label, active, first_seen, last_seen)
+		VALUES (?, ?, 1, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET last_seen = excluded.last_seen`,
+		id, label, now(), now())
+	return err
+}
+
+func (s *Store) RepairsDeviceActive(id string) (bool, error) {
+	var active int
+	err := s.db.QueryRow(`SELECT active FROM repairs_devices WHERE id = ?`, id).Scan(&active)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return active != 0, nil
+}
+
+func (s *Store) ListRepairsDevices() ([]RepairsDevice, error) {
+	rows, err := s.db.Query(`
+		SELECT id, label, active, first_seen, last_seen
+		FROM repairs_devices ORDER BY last_seen DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []RepairsDevice{}
+	for rows.Next() {
+		var d RepairsDevice
+		var active int
+		if err := rows.Scan(&d.ID, &d.Label, &active, &d.FirstSeen, &d.LastSeen); err != nil {
+			return nil, err
+		}
+		d.Active = active != 0
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) RevokeRepairsDevice(id string) error {
+	_, err := s.db.Exec(`UPDATE repairs_devices SET active = 0 WHERE id = ?`, id)
+	return err
+}

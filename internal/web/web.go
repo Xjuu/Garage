@@ -26,6 +26,7 @@ import (
 	"goldstar/internal/export"
 	"goldstar/internal/jobs"
 	"goldstar/internal/pipeline"
+	"goldstar/internal/repairsauth"
 	"goldstar/internal/store"
 )
 
@@ -37,13 +38,14 @@ var assets embed.FS
 const maxUploadBytes = 25 << 20
 
 type Server struct {
-	cfg     *config.Config
-	db      *store.Store
-	auth    *auth.Auth
-	jobs    *jobs.Runner
-	exports *export.Catalogue
-	sched   *scheduler
-	logs    *logBuffer
+	cfg         *config.Config
+	db          *store.Store
+	auth        *auth.Auth
+	jobs        *jobs.Runner
+	exports     *export.Catalogue
+	sched       *scheduler
+	logs        *logBuffer
+	repairsAuth *repairsauth.Auth
 }
 
 func New(cfg *config.Config, db *store.Store) (*Server, error) {
@@ -74,10 +76,20 @@ func New(cfg *config.Config, db *store.Store) (*Server, error) {
 		return nil, fmt.Errorf(
 			"refusing to bind %s without a password: that address is reachable from the network", cfg.WebAddr)
 	}
+
+	// Independent of the dashboard's own auth entirely — a missing or unset
+	// PIN just means the repairs site refuses every request (see
+	// handleRepairsRoot), not that goldstar itself fails to start.
+	ra, err := repairsauth.New(cfg.RepairsPIN, cfg.RepairsSessionKeyPath(), cfg.CookieSecure)
+	if err != nil {
+		return nil, fmt.Errorf("repairs auth: %w", err)
+	}
+
 	return &Server{
 		cfg: cfg, db: db, auth: a, jobs: jobs.New(),
-		exports: export.NewCatalogue(cfg.ExportsDir()),
-		logs:    logs,
+		exports:     export.NewCatalogue(cfg.ExportsDir()),
+		logs:        logs,
+		repairsAuth: ra,
 	}, nil
 }
 
@@ -147,11 +159,30 @@ func (s *Server) Listen(ctx context.Context, addr string) error {
 	s.routesFleet(api)
 	s.routesTraining(api)
 	s.routesAdmin(api)
+	s.routesRepairsAdmin(api)
 	mux.Handle("/api/", s.auth.Protect(api))
+
+	// repairs.<domain> is an entirely separate small app sharing this same
+	// process and port — a Cloudflare tunnel can only forward one hostname
+	// to one local address per ingress rule, so the dispatch has to happen
+	// here, after the TLS/host information has already reached us, by
+	// looking at the Host header on every request.
+	repairsMux := s.repairsRoutes(sub)
+	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		if strings.HasPrefix(host, "repairs.") {
+			repairsMux.ServeHTTP(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           securityHeaders(mux),
+		Handler:           securityHeaders(router),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}

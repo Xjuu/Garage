@@ -274,4 +274,53 @@ $('show-totp-qr').addEventListener('click', async () => {
   btn.textContent = 'Show QR code';
 });
 
-Object.assign(viewLoaders, { admin: () => loadAdmin().then(loadLogs) });
+async function loadRepairsAdmin() {
+  const [devices, recent] = await Promise.all([
+    api('/api/admin/repairs-devices'),
+    api('/api/admin/repairs-recent'),
+  ]);
+
+  $('rd-rows').innerHTML = devices.length
+    ? devices.map((d) => `
+        <tr><td class="mono truncate" title="${esc(d.label)}">${dash(d.label) || '<span class="muted">unknown device</span>'}</td>
+          <td class="mono">${whenLocal(d.first_seen)}</td>
+          <td class="mono">${whenLocal(d.last_seen)}</td>
+          <td>${d.active ? '<span class="pill">Active</span>' : '<span class="pill flag">Revoked</span>'}</td>
+          <td>${d.active ? `<button class="btn sm danger" data-id="${esc(d.id)}">Revoke</button>` : ''}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="empty">No device has signed in yet</td></tr>';
+  $('rd-rows').querySelectorAll('button[data-id]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      try {
+        await api('/api/admin/repairs-devices/revoke', { method: 'POST', json: { id: b.dataset.id } });
+        loadRepairsAdmin();
+      } catch (e) { toast(e.message, true); }
+    }));
+
+  $('rt-rows').innerHTML = recent.length
+    ? recent.map((r) => `
+        <tr><td class="mono">${whenLocal(r.created_at)}</td>
+          <td><span class="reg">${esc(r.vehicle_reg)}</span></td>
+          <td>${esc(r.service_type === 'other' ? (r.service_type_other || 'Other') : (r.service_type === 'full' ? 'Full service' : 'Mini service'))}</td>
+          <td class="num">${r.mileage ? int(r.mileage) : '—'}</td>
+          <td class="mono truncate">${dash(r.device_name)}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="empty">Nothing logged yet</td></tr>';
+}
+
+$('rp-save').addEventListener('click', async () => {
+  const pin = $('rp-pin').value.trim();
+  const result = $('rp-result');
+  result.innerHTML = '';
+  if (!/^\d{4,12}$/.test(pin)) {
+    result.innerHTML = '<span class="pill flag">4-12 digits only</span>';
+    return;
+  }
+  try {
+    const r = await api('/api/admin/repairs-pin', { method: 'POST', json: { pin } });
+    result.innerHTML = `<span class="pill">Saved</span> <span style="margin-left:8px">${esc(r.message)}</span>`;
+    $('rp-pin').value = '';
+  } catch (e) {
+    result.innerHTML = `<span class="pill flag">Failed</span> <span style="margin-left:8px">${esc(e.message)}</span>`;
+  }
+});
+
+Object.assign(viewLoaders, { admin: () => loadAdmin().then(loadLogs).then(loadRepairsAdmin) });

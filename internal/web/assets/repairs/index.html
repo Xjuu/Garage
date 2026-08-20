@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Repairs log</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/repairs/repairs.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='black'/><text x='16' y='23' font-size='20' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>R</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="brand-mark">R</span> Repairs log</div>
+    <span class="credit">Made by Filip Klonowski</span>
+    <div class="spacer"></div>
+    <button class="btn" id="btn-signout">Sign out</button>
+  </div>
+</header>
+
+<main class="rp-main">
+
+  <section class="rp-step">
+    <div class="section-title">Registration</div>
+    <div class="search-wrap">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      <input type="text" id="reg-input" autocomplete="off"
+             placeholder="Registration… or tap in to browse all">
+    </div>
+    <div class="rp-results-label" id="reg-results-label" hidden></div>
+    <div class="rp-results" id="reg-results" hidden></div>
+  </section>
+
+  <section class="rp-history" id="history-section" hidden>
+    <div class="section-title">Previous visits — <span class="reg" id="history-reg"></span></div>
+    <div class="rp-history-list" id="history-list"></div>
+  </section>
+
+  <form class="rp-form" id="form" hidden>
+    <div class="section-title">Log this visit</div>
+
+    <div class="field">
+      <label>Service type</label>
+      <div class="rp-choice" id="service-type-choice">
+        <button type="button" class="rp-choice-btn" data-value="full">Full service</button>
+        <button type="button" class="rp-choice-btn" data-value="mini">Mini service</button>
+        <button type="button" class="rp-choice-btn" data-value="other">Other</button>
+      </div>
+      <input type="text" id="service-type-other" placeholder="Describe the service type" hidden>
+    </div>
+
+    <div class="field">
+      <label for="mileage">Mileage</label>
+      <input type="number" id="mileage" inputmode="numeric" min="0" step="1">
+    </div>
+
+    <div class="field">
+      <label>Timing belt changed?</label>
+      <div class="rp-choice" id="belt-choice">
+        <button type="button" class="rp-choice-btn" data-value="no">No</button>
+        <button type="button" class="rp-choice-btn" data-value="yes">Yes</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="description">Description of repair</label>
+      <textarea id="description" rows="3" placeholder="What was done"></textarea>
+    </div>
+
+    <div class="rp-divider">
+      Vehicle details <span class="muted">— fills in what's known on the registry, leave blank if unsure</span>
+    </div>
+
+    <div class="grid2">
+      <div class="field"><label for="vin">VIN / chassis number</label><input type="text" id="vin" autocomplete="off"></div>
+      <div class="field"><label for="make">Make</label><input type="text" id="make" autocomplete="off"></div>
+      <div class="field"><label for="model">Model</label><input type="text" id="model" autocomplete="off"></div>
+      <div class="field"><label for="colour">Colour</label><input type="text" id="colour" autocomplete="off"></div>
+      <div class="field"><label for="cylinder-capacity">Cylinder capacity</label><input type="text" id="cylinder-capacity" autocomplete="off"></div>
+      <div class="field"><label for="spare-keys">Spare key / number of keys</label><input type="text" id="spare-keys" autocomplete="off"></div>
+      <div class="field"><label for="fuel-type">Type of fuel</label><input type="text" id="fuel-type" autocomplete="off"></div>
+      <div class="field"><label for="engine-size">Engine size</label><input type="text" id="engine-size" autocomplete="off"></div>
+      <div class="field"><label for="tyre-size">Tyre size</label><input type="text" id="tyre-size" autocomplete="off"></div>
+      <div class="field"><label for="radio-code">Radio code</label><input type="text" id="radio-code" autocomplete="off"></div>
+      <div class="field"><label for="oil-amount">Oil (amount)</label><input type="text" id="oil-amount" autocomplete="off"></div>
+    </div>
+
+    <button class="btn solid rp-submit" id="btn-log" type="submit">Log visit</button>
+    <div class="login-err" id="log-err" role="alert"></div>
+  </form>
+
+</main>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="/static/repairs/app.js"></script>
+</body>
+</html>
