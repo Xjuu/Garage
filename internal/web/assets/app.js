@@ -572,23 +572,23 @@ const TOP_SHORTCUT_KEYS = Object.fromEntries(TOP_SHORTCUTS.map(([k, view]) => [k
 // shortcut — but only while a view from that group is actually on screen,
 // and only for the groups that have subtabs to jump between at all.
 //
-// Two letters collide within Analysis (Spending/Suppliers both start with
-// S; Vehicles/VAT both start with V). The more central one keeps the plain
-// first letter — Spending because it's the group's own default landing
-// view, Vehicles because fleet costs are what the rest of the app is
-// built around — and the other takes its second letter instead
-// (sUppliers, vAt), which stays legible without inventing an arbitrary key.
-//
-// Inside these two groups this also shadows the global Sync (S) and
-// Upload (U) shortcuts — a deliberate trade a wider dashboard might not
-// make, but both buttons stay one click away in the topbar regardless,
-// and the shadowing only applies while actually looking at that group.
+// S, U and G are off-limits here, full stop — they stay Sync/Upload/Generate
+// everywhere, including inside these sections, rather than being shadowed
+// by a subtab that happens to also start with one of those letters. A
+// letter's natural word keeps it when nothing else in the same section
+// wants it too (Vehicles keeps V, Parts keeps P — neither collides with
+// anything); a word that loses its own first letter, whether to the global
+// reservation or to another subtab in the same group, falls back to the
+// first letter later in its own name that neither reservation claims:
+//   Spending  → S is global (Sync)                        → E (spEnding)
+//   Suppliers → S is global, U is global                   → L (suppLiers)
+//   VAT       → V is Vehicles' (the more central one keeps it) → A (vAt)
 const SECTION_SHORTCUTS = {
   analysis: [
-    ['s', 'spending', 'Spending'],
     ['v', 'vehicles', 'Vehicles'],
     ['p', 'parts', 'Parts'],
-    ['u', 'suppliers', 'Suppliers'],
+    ['e', 'spending', 'Spending'],
+    ['l', 'suppliers', 'Suppliers'],
     ['a', 'vat', 'VAT'],
   ],
   setup: [
@@ -602,9 +602,20 @@ const SECTION_SHORTCUTS = {
     section (if any) `view` belongs to — called from show() so it can never
     drift out of sync with what Escape/1-4/clicking a tab actually land on. */
 function renderSectionShortcuts(view) {
-  const items = SECTION_SHORTCUTS[groupOf[view]];
-  $('section-shortcuts').innerHTML = (items || [])
-    .map(([k, , label]) => `<span class="chip"><kbd>${esc(k.toUpperCase())}</kbd> ${esc(label)}</span>`).join('');
+  const group = groupOf[view];
+  const items = SECTION_SHORTCUTS[group];
+  if (!items) { $('section-shortcuts').innerHTML = ''; return; }
+
+  // A labelled group of its own, not just more chips blended into the
+  // always-on row: a plain divider was easy to miss, so this spells out
+  // which section these belong to and gives them a visibly different chip
+  // — a solid ink border instead of the soft grey one — so "always
+  // available" and "only right now, in Analysis" read apart at a glance.
+  const groupLabel = GROUPS.find((g) => g.id === group)?.label || '';
+  $('section-shortcuts').innerHTML =
+    `<span class="section-label">In ${esc(groupLabel)}</span>` +
+    items.map(([k, , label]) =>
+      `<span class="chip section-chip"><kbd>${esc(k.toUpperCase())}</kbd> ${esc(label)}</span>`).join('');
 }
 
 document.addEventListener('keydown', (e) => {
@@ -620,9 +631,9 @@ document.addEventListener('keydown', (e) => {
 
   if (TOP_SHORTCUT_KEYS[e.key]) { e.preventDefault(); show(TOP_SHORTCUT_KEYS[e.key]); return; }
 
-  // Section shortcuts are checked, and take priority, before the global
-  // action keys below — see the comment on SECTION_SHORTCUTS for why S and
-  // U are deliberately shadowed while inside Analysis.
+  // Section shortcuts never share a letter with S/U/G (see SECTION_SHORTCUTS),
+  // so checking them first rather than after the switch below is just
+  // organisation, not a priority order that actually has to matter.
   const key = e.key.toLowerCase();
   const section = SECTION_SHORTCUTS[groupOf[state.view]];
   const hit = section?.find(([k]) => k === key);

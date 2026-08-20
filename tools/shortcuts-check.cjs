@@ -226,21 +226,38 @@ check('Escape does not go back while the search dropdown is open', shown.length 
 store['omni-results'].hidden = true;
 
 // 9. Section shortcuts: once inside Analysis (pressing '3' lands on
-//    Spending), its own subtabs get first-letter keys — including S and U,
-//    which deliberately shadow the global Sync/Upload shortcuts while
-//    actually looking at this section. Two real collisions get resolved the
-//    same way every time: the more central subtab keeps the plain letter
-//    (Spending over Suppliers, Vehicles over VAT), the other takes its
-//    second letter.
+//    Spending), its own subtabs get first-letter keys — but never S, U or
+//    G, which stay Sync/Upload/Generate everywhere, including here. Words
+//    that lose their own first letter (to that reservation, or to another
+//    subtab in the same group) fall back to a later, unclaimed letter in
+//    their own name: Spending → E (spEnding), Suppliers → L (suppLiers),
+//    VAT → A (vAt, since Vehicles keeps V).
 press('3'); // into Analysis, landing on Spending
 check('the shortcuts bar actually shows the Analysis subtab chips',
   ['Spending', 'Vehicles', 'Parts', 'Suppliers', 'VAT'].every((label) => store['section-shortcuts'].innerHTML.includes(label)));
-for (const [key, view] of [['s', 'spending'], ['v', 'vehicles'], ['p', 'parts'], ['u', 'suppliers'], ['a', 'vat']]) {
+check('the shortcuts bar names which section these belong to',
+  store['section-shortcuts'].innerHTML.includes('Analysis'));
+for (const [key, view] of [['v', 'vehicles'], ['p', 'parts'], ['e', 'spending'], ['l', 'suppliers'], ['a', 'vat']]) {
   shown.length = 0; clicks.length = 0;
   press(key);
   check(`inside Analysis, "${key}" goes to ${view}`, shown[0] === view);
 }
-check('"u" went to Suppliers, not Upload — the shadowing actually applies', clicks.length === 0);
+
+// 9b. None of Analysis's letters touch S, U or G at all — so those three
+//     must still mean Sync/Upload/Generate even while inside this section,
+//     with no shadowing to prove doesn't happen anymore.
+for (const [key, id] of [['s', 'btn-sync'], ['u', 'btn-upload'], ['g', 'btn-sheet']]) {
+  clicks.length = 0; shown.length = 0;
+  press(key);
+  check(`inside Analysis, "${key}" still clicks #${id} (no shadowing)`, clicks.includes(id) && shown.length === 0);
+}
+// The 'g' press just now genuinely opened the Generate dialog through its
+// real click handler — reset it, or every check from here on would be
+// silently swallowed by the "a dialog is open" guard for a reason that has
+// nothing to do with what they're actually testing. Same leftover-state
+// mistake this file already caught once before; still worth getting right
+// a second time rather than assuming it won't happen again.
+store['gen-modal'].hidden = true;
 
 // 10. Setup has no letter collisions, so this is really just confirming the
 //     group-scoping picks the right table at all, not Analysis's leftover

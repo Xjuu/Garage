@@ -702,7 +702,24 @@ td.strong { font-weight: 700; }
    leftover divider floating on its own. */
 .section-shortcuts:not(:empty) {
   display: inline-flex; align-items: center; gap: 8px;
-  padding-left: 8px; border-left: 1px solid var(--g2);
+  padding-left: 10px; border-left: 1px dashed var(--g3);
+}
+
+/* A plain divider on its own was too easy to miss — this names the section
+   outright, in the same small-caps caption style used for section headings
+   elsewhere on the page, so there's no ambiguity about which chips are
+   "always available" and which only apply while looking at this one part
+   of the app. */
+.section-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--g4); white-space: nowrap;
+}
+
+/* Solid ink border and a filled background, in contrast to the soft grey
+   outline every always-on chip uses — the visual cue that these five (or
+   three) only mean something right now, not everywhere. */
+.shortcuts-bar .chip.section-chip {
+  border-color: var(--ink); background: var(--g1);
 }
 
 /* Keyboard shortcuts have no audience on a touchscreen, so this is one of
