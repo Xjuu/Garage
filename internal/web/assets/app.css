@@ -458,6 +458,20 @@ td.strong { font-weight: 700; }
 .toast.bad { background: var(--flag); }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 
+/* .toasts is pointer-events:none so a plain status toast never blocks a
+   click on whatever is underneath it — but an action toast has a real
+   button, so it opts back in for itself specifically. */
+.toast.action {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 8px 8px 18px;
+  pointer-events: auto;
+}
+.toast.action .btn {
+  background: var(--paper); color: var(--ink); border: none;
+  font-weight: 700; flex-shrink: 0;
+}
+.toast.action .btn:hover { background: var(--g2); }
+
 /* ── Cookie notice ──────────────────────────────────────────────────── */
 
 .cookie-notice {

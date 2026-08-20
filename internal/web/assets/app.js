@@ -56,6 +56,29 @@ function toast(msg, bad = false) {
   setTimeout(() => el.remove(), bad ? 6000 : 3200);
 }
 
+/** A toast with a button — an offer, not a question that blocks anything.
+    It sits for a few seconds and fades on its own exactly like any other
+    toast if ignored; nothing about it demands a decision, and nothing on
+    screen is disabled while it's up. Clicking the button both acts and
+    dismisses it early. */
+function actionToast(msg, actionLabel, onAction, ms = 6000) {
+  const el = document.createElement('div');
+  el.className = 'toast action';
+
+  const text = document.createElement('span');
+  text.textContent = msg;
+
+  const btn = document.createElement('button');
+  btn.className = 'btn sm';
+  btn.textContent = actionLabel;
+  btn.addEventListener('click', () => { el.remove(); onAction(); });
+
+  el.appendChild(text);
+  el.appendChild(btn);
+  $('toasts').appendChild(el);
+  setTimeout(() => el.remove(), ms);
+}
+
 function debounce(fn, ms) {
   let t;
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };

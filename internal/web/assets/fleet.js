@@ -101,6 +101,18 @@ async function loadVehicleDetail() {
     : '<tr><td colspan="6" class="empty">No invoices</td></tr>';
   $('veh-invoices').querySelectorAll('tr[data-id]').forEach((tr) =>
     tr.addEventListener('click', () => openInvoice(tr.dataset.id)));
+
+  // An offer, not an automatic jump: opening a vehicle used to silently
+  // carry no filter over to Invoices at all — filterByVehicle already
+  // existed to do it, it just had nothing wired up to call it. Landing on
+  // this page and asking "did you want to work with just this car's
+  // invoices?" as a toast that fades in a few seconds if ignored gets the
+  // shortcut without ever deciding that for someone who just wanted to
+  // glance at the vehicle's numbers.
+  if (v.invoices > 0) {
+    actionToast(`Show only ${v.registration}'s invoices?`, 'Show invoices',
+      () => filterByVehicle(v.registration));
+  }
 }
 
 // ── part detail ───────────────────────────────────────────────────────────
