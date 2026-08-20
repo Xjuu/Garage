@@ -548,6 +548,8 @@ type PricePoint struct {
 	UnitPrice float64 `json:"unit_price"`
 	Quantity  float64 `json:"quantity"`
 	Netto     float64 `json:"netto"`
+	VAT       float64 `json:"vat"`
+	Brutto    float64 `json:"brutto"`
 	InvoiceID int64   `json:"invoice_id"`
 }
 
@@ -557,6 +559,8 @@ type PartStats struct {
 	Times        int           `json:"times"`
 	Quantity     float64       `json:"quantity"`
 	Netto        float64       `json:"netto"`
+	VAT          float64       `json:"vat"`
+	Brutto       float64       `json:"brutto"`
 	AvgUnitPrice float64       `json:"avg_unit_price"`
 	MinUnitPrice float64       `json:"min_unit_price"`
 	MaxUnitPrice float64       `json:"max_unit_price"`
@@ -579,7 +583,7 @@ func (s *Store) PartStats(part string) (*PartStats, error) {
 	rows, err := s.db.Query(`
 		SELECT COALESCE(NULLIF(i.invoice_date,''),''), i.supplier,
 		       COALESCE(NULLIF(it.vehicle_reg,''), i.vehicle_reg),
-		       it.unit_price, it.quantity, it.netto, i.id
+		       it.unit_price, it.quantity, it.netto, it.vat_amount, it.brutto, i.id
 		FROM invoice_items it
 		JOIN invoices i ON i.id = it.invoice_id
 		WHERE it.part_number = ?
@@ -592,7 +596,7 @@ func (s *Store) PartStats(part string) (*PartStats, error) {
 	for rows.Next() {
 		var p PricePoint
 		if err := rows.Scan(&p.Date, &p.Supplier, &p.Vehicle, &p.UnitPrice,
-			&p.Quantity, &p.Netto, &p.InvoiceID); err != nil {
+			&p.Quantity, &p.Netto, &p.VAT, &p.Brutto, &p.InvoiceID); err != nil {
 			return nil, err
 		}
 		out.History = append(out.History, p)
@@ -611,6 +615,8 @@ func (s *Store) PartStats(part string) (*PartStats, error) {
 	for _, p := range out.History {
 		out.Quantity += p.Quantity
 		out.Netto += p.Netto
+		out.VAT += p.VAT
+		out.Brutto += p.Brutto
 		if p.UnitPrice > 0 {
 			unitSum += p.UnitPrice
 			priced++

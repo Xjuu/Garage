@@ -121,7 +121,9 @@ async function loadPartDetail() {
       };
 
   $('part-tiles').innerHTML = [
+    { k: 'Total (incl. VAT)', v: '£' + money(d.brutto) },
     { k: 'Total net', v: '£' + money(d.netto) },
+    { k: 'VAT', v: '£' + money(d.vat) },
     { k: 'Purchases', v: int(d.times) },
     { k: 'Quantity', v: int(d.quantity) },
     { k: 'Avg unit', v: '£' + money(d.avg_unit_price) },
@@ -150,8 +152,9 @@ async function loadPartDetail() {
           <td>${h.vehicle ? `<span class="reg">${esc(h.vehicle)}</span>` : '<span class="muted">—</span>'}</td>
           <td class="num">${int(h.quantity)}</td>
           <td class="num strong">${money(h.unit_price)}</td>
-          <td class="num">${money(h.netto)}</td></tr>`).join('')
-    : '<tr><td colspan="6" class="empty">No purchases</td></tr>';
+          <td class="num">${money(h.netto)}</td>
+          <td class="num">${money(h.brutto)}</td></tr>`).join('')
+    : '<tr><td colspan="7" class="empty">No purchases</td></tr>';
   $('part-history').querySelectorAll('tr[data-id]').forEach((tr) =>
     tr.addEventListener('click', () => openInvoice(tr.dataset.id)));
 }
