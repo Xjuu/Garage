@@ -29,6 +29,46 @@
       <button class="btn solid" type="submit" id="submit">Sign in</button>
       <div class="login-err" id="err" role="alert"></div>
     </form>
+
+    <!-- Shown once a correct password proves this account has never
+         finished 2FA setup — mandatory before the dashboard is reachable. -->
+    <div id="totp-setup" class="totp-panel" hidden>
+      <p class="sub">Set up two-factor authentication to continue. Scan this
+        with Authy, Google Authenticator or any TOTP app.</p>
+      <img id="totp-qr" class="totp-qr" width="200" height="200"
+           alt="Two-factor setup QR code — scan with an authenticator app">
+      <div class="totp-manual">
+        <span>Can't scan it? Enter this key manually:</span>
+        <code id="totp-secret" class="mono"></code>
+      </div>
+      <form id="setup-form">
+        <div class="field">
+          <label for="setup-code">6-digit code</label>
+          <input type="text" id="setup-code" inputmode="numeric" pattern="[0-9]*"
+                 autocomplete="one-time-code" maxlength="6" required
+                 placeholder="000000">
+        </div>
+        <button class="btn solid" type="submit" id="setup-submit">Confirm and finish setup</button>
+        <div class="login-err" id="setup-err" role="alert"></div>
+      </form>
+      <a href="#" class="totp-restart" id="setup-restart">Not you? Sign in again</a>
+    </div>
+
+    <!-- Shown once a correct password proves this account already has 2FA. -->
+    <div id="totp-verify" class="totp-panel" hidden>
+      <p class="sub">Enter the 6-digit code from your authenticator app.</p>
+      <form id="verify-form">
+        <div class="field">
+          <label for="verify-code">6-digit code</label>
+          <input type="text" id="verify-code" inputmode="numeric" pattern="[0-9]*"
+                 autocomplete="one-time-code" maxlength="6" required autofocus
+                 placeholder="000000">
+        </div>
+        <button class="btn solid" type="submit" id="verify-submit">Verify</button>
+        <div class="login-err" id="verify-err" role="alert"></div>
+      </form>
+      <a href="#" class="totp-restart" id="verify-restart">Not you? Sign in again</a>
+    </div>
   </div>
 </div>
 <footer class="credit-login">Made by Filip Klonowski</footer>

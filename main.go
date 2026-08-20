@@ -45,6 +45,8 @@ Usage:
   goldstar eval      Re-extract every completed example and score the accuracy
   goldstar serve     Serve the dashboard (default 127.0.0.1:8787)
   goldstar passwd    Generate the dashboard password hash
+  goldstar totp-reset  Clear two-factor auth — the next login has to set it up again.
+                     Use this if the device with the authenticator app is lost.
   goldstar doctor    Check configuration and connectivity without changing anything
   goldstar models    List the Gemini models this API key can call
 
@@ -81,9 +83,20 @@ func realMain(cmd string) error {
 		return err
 	}
 
-	// passwd needs no database and must work before anything is configured.
+	// passwd and totp-reset need no database and must work before anything
+	// else is configured.
 	if cmd == "passwd" {
 		return passwd()
+	}
+	if cmd == "totp-reset" {
+		if err := cfg.ClearTOTPSecret(); err != nil {
+			return err
+		}
+		fmt.Println("Two-factor authentication has been cleared.")
+		fmt.Println("The next login will need to set it up again from a QR code.")
+		fmt.Println("Restart `goldstar serve` (or the systemd service) for this to take effect —")
+		fmt.Println("a running process keeps the old secret in memory until it reloads.")
+		return nil
 	}
 
 	if err := cfg.EnsureDirs(); err != nil {

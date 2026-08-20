@@ -472,6 +472,30 @@ td.strong { font-weight: 700; }
   margin-top: 12px; min-height: 18px;
 }
 
+.totp-panel .sub { margin-bottom: 18px; }
+.totp-qr {
+  display: block; width: 200px; height: 200px; margin: 0 auto 18px;
+  padding: 12px; box-sizing: content-box;
+  background: #fff; border: 1px solid var(--g2); border-radius: var(--radius-sm);
+}
+.totp-manual {
+  text-align: center; font-size: 13px; color: var(--g4);
+  margin-bottom: 22px;
+}
+.totp-manual code {
+  display: block; margin-top: 6px; font-size: 15px; font-weight: 700;
+  letter-spacing: .04em; color: var(--ink);
+}
+#setup-code, #verify-code {
+  text-align: center; font-family: var(--mono); font-size: 22px;
+  font-weight: 700; letter-spacing: .3em;
+}
+.totp-restart {
+  display: block; text-align: center; margin-top: 16px;
+  font-size: 13px; color: var(--g4);
+}
+.totp-restart:hover { color: var(--ink); }
+
 /* ── Responsive ─────────────────────────────────────────────────────── */
 
 @media (max-width: 720px) {

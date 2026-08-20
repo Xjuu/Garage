@@ -58,6 +58,7 @@ goldstar doctor                          # verifies config + mailbox login
 | `goldstar export` | Rebuild the workbook from stored data. |
 | `goldstar serve` | Dashboard on <http://127.0.0.1:8787>. |
 | `goldstar passwd` | Generate the dashboard password hash. |
+| `goldstar totp-reset` | Clear two-factor auth. Use this if the authenticator device is lost — the next login sets it up again from a new QR code. |
 | `goldstar doctor` | Check config and mailbox connectivity. Changes nothing. |
 | `goldstar examples` | Register new reference invoices from the examples folder. |
 | `goldstar eval` | Re-extract every example and score accuracy. |
@@ -170,10 +171,20 @@ goldstar passwd     # paste the printed line into your .env
 Full walkthrough, including Cloudflare Access as a second gate, plus an honest
 list of what is *not* protected: **[deploy/TUNNEL.md](deploy/TUNNEL.md)**.
 
-Security built in: Argon2id password hashing, HMAC-signed `HttpOnly` session
-cookies, CSRF tokens on every mutating request, login rate limiting keyed on
-`CF-Connecting-IP`, a strict CSP, and archived documents served only by database
-id from inside the attachments directory.
+Security built in: Argon2id password hashing, mandatory two-factor auth (TOTP —
+Authy, Google Authenticator, and the like) once a password is set, HMAC-signed
+`HttpOnly` session cookies, CSRF tokens on every mutating request, login rate
+limiting keyed on `CF-Connecting-IP`, a strict CSP, and archived documents
+served only by database id from inside the attachments directory.
+
+Setting a password for the first time — or upgrading from a build before
+2FA existed — means the very next login shows a QR code and requires
+finishing setup before the dashboard is reachable. After that, every login
+asks for a 6-digit code alongside the password. Lost the phone? Run
+`goldstar totp-reset` on the server and restart; the next login sets it up
+again from scratch. There is no way to turn 2FA off, or to reset it, from
+the dashboard itself — only from the server, so knowing the password alone
+is never enough to strip it.
 
 ## Where the data lives
 

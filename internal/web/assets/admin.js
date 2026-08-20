@@ -34,6 +34,8 @@ async function loadAdmin() {
     ['Scan window', `${a.lookback_days} days`],
     ['Dashboard address', esc(a.web_addr)],
     ['Dashboard password', a.password_set ? ok('set') : warn('NOT SET')],
+    ['Two-factor authentication', a.totp_set ? ok('set up')
+      : warn('will be required on the next login')],
     ['Secure cookies', a.cookie_secure ? ok('on') : warn('off — turn on behind a tunnel')],
     ['Data folder', `<span class="mono">${esc(a.data_dir)}</span>`],
     ['Examples folder', `<span class="mono">${esc(a.examples_dir)}</span>`],

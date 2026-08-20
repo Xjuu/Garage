@@ -60,6 +60,7 @@ func New(cfg *config.Config, db *store.Store) (*Server, error) {
 		return nil, err
 	}
 	a.SetIdentity(cfg.User, cfg.Email)
+	a.SetTOTPSecret(cfg.TOTPSecret)
 	// A password is required unless explicitly waived. Checking the bind
 	// address is not enough: cloudflared connects over loopback, so a tunnel
 	// publishes a 127.0.0.1 listener to the whole internet.
@@ -114,6 +115,9 @@ func (s *Server) Listen(ctx context.Context, addr string) error {
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/session", s.handleSession)
+	mux.HandleFunc("POST /api/login/totp/setup", s.handleTOTPSetup)
+	mux.HandleFunc("POST /api/login/totp/confirm", s.handleTOTPConfirm)
+	mux.HandleFunc("POST /api/login/totp/verify", s.handleTOTPVerify)
 
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/overview", s.json(s.overview))
@@ -292,12 +296,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := s.auth.Login(w, r, body.User, body.Password); err != nil {
+	stage, err := s.auth.Login(w, r, body.User, body.Password)
+	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	// The password alone never finishes a login — see Auth.Login. "setup"
+	// means this account has never completed 2FA; "verify" means it has and
+	// a code is needed next.
+	json.NewEncoder(w).Encode(map[string]any{"ok": false, "stage": stage})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -308,10 +316,22 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{
+	out := map[string]any{
 		"authenticated": s.auth.IsAuthenticated(r),
 		"password_set":  s.auth.Configured(),
-	})
+	}
+	// A reload in the middle of the 2FA step has no session cookie yet, only
+	// the pending one — without this, refreshing the setup or verify page
+	// would just bounce back to the password form and lose the QR code.
+	if !out["authenticated"].(bool) && s.auth.PendingOK(r) {
+		out["totp_pending"] = true
+		if s.auth.TOTPConfigured() {
+			out["totp_stage"] = "verify"
+		} else {
+			out["totp_stage"] = "setup"
+		}
+	}
+	json.NewEncoder(w).Encode(out)
 }
 
 // ── data endpoints ────────────────────────────────────────────────────────

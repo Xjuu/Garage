@@ -48,6 +48,11 @@ type Config struct {
 
 	// PasswordHash gates the dashboard. Generate it with `goldstar passwd`.
 	PasswordHash string
+	// TOTPSecret is the confirmed base32 two-factor secret. Empty means this
+	// account has not finished 2FA setup yet — mandatory once PasswordHash is
+	// set, so the next login is required to complete it before reaching the
+	// dashboard.
+	TOTPSecret string
 	// CookieSecure marks session cookies Secure. Required behind a Cloudflare
 	// tunnel, which always terminates TLS.
 	CookieSecure bool
@@ -127,6 +132,11 @@ func Load() (*Config, error) {
 			c.PasswordHash = string(h)
 		}
 	}
+	if b, err := os.ReadFile(c.TOTPFilePath()); err == nil {
+		if v := bytes.TrimSpace(b); len(v) > 0 {
+			c.TOTPSecret = string(v)
+		}
+	}
 	return c, nil
 }
 
@@ -158,6 +168,31 @@ func (c *Config) WritePasswordHash(hash string) error {
 		return err
 	}
 	return os.WriteFile(c.PasswordFilePath(), []byte(hash+"\n"), 0o600)
+}
+
+// TOTPFilePath holds the confirmed two-factor secret, alongside the password
+// hash it is required to accompany.
+func (c *Config) TOTPFilePath() string { return filepath.Join(c.DataDir, "totp.secret") }
+
+// WriteTOTPSecret persists the secret once its setup code has been verified.
+func (c *Config) WriteTOTPSecret(secret string) error {
+	if err := os.MkdirAll(c.DataDir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(c.TOTPFilePath(), []byte(strings.TrimSpace(secret)+"\n"), 0o600)
+}
+
+// ClearTOTPSecret removes 2FA from the account — the "lost my phone"
+// recovery path. Deliberately a server-side-only operation (`goldstar
+// totp-reset`, run over SSH), not a dashboard control: exposing this as a
+// button in the web UI would let anyone holding just the password strip off
+// the second factor through the same login form it exists to guard.
+func (c *Config) ClearTOTPSecret() error {
+	err := os.Remove(c.TOTPFilePath())
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // SessionKeyPath holds the HMAC key that signs session cookies. Deleting this

@@ -74,6 +74,7 @@ func (s *Server) adminStatus(r *http.Request) (any, error) {
 		"web_addr":       s.cfg.WebAddr,
 		"cookie_secure":  s.cfg.CookieSecure,
 		"password_set":   s.auth.Configured(),
+		"totp_set":       s.auth.TOTPConfigured(),
 		"invoices":       invoices,
 		"items":          items,
 		"examples":       len(examples),
