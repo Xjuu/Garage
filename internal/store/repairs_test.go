@@ -45,8 +45,11 @@ func TestLogRepairDefaultsDateButRespectsAnExplicitOne(t *testing.T) {
 		t.Fatalf("LogRepair with an explicit date: %v", err)
 	}
 	got, _ = db.ListRepairsForVehicle("AB12CDE")
-	if got[0].ServiceDate != "2019-03-14" {
-		t.Fatalf("ServiceDate = %q, want the historical date to be respected verbatim", got[0].ServiceDate)
+	// Newest-by-date first, so today's (already inserted) visit still leads
+	// — the historical one just needs to have kept its own date verbatim,
+	// not the day it happened to be logged.
+	if len(got) != 2 || got[1].ServiceDate != "2019-03-14" {
+		t.Fatalf("got = %+v, want a second row with ServiceDate 2019-03-14", got)
 	}
 }
 
@@ -152,6 +155,34 @@ func TestListRepairsForVehicleIsNewestFirst(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].Description != "second" || got[1].Description != "first" {
 		t.Fatalf("order = %+v, want newest first", got)
+	}
+}
+
+// The regression this test exists for: the historical import inserts rows
+// in the source spreadsheet's own row order, which is not guaranteed to be
+// chronological — a real vehicle in the actual data had its January 2026
+// visit's row sit above its June 2025 visit's row. Ordering by insertion
+// id would show the wrong visit as "most recent" (and prefill the worker
+// form from the wrong one); ordering by service_date must not.
+func TestListRepairsForVehicleOrdersByDateNotInsertionOrder(t *testing.T) {
+	db := open(t)
+	if _, err := db.LogRepair(Repair{
+		VehicleReg: "AB12CDE", ServiceType: "full", ServiceDate: "2026-01-21", Description: "later visit, inserted first",
+	}, "historical-import"); err != nil {
+		t.Fatalf("LogRepair: %v", err)
+	}
+	if _, err := db.LogRepair(Repair{
+		VehicleReg: "AB12CDE", ServiceType: "mini", ServiceDate: "2025-06-03", Description: "earlier visit, inserted second",
+	}, "historical-import"); err != nil {
+		t.Fatalf("LogRepair: %v", err)
+	}
+
+	got, err := db.ListRepairsForVehicle("AB12CDE")
+	if err != nil {
+		t.Fatalf("ListRepairsForVehicle: %v", err)
+	}
+	if len(got) != 2 || got[0].ServiceDate != "2026-01-21" || got[1].ServiceDate != "2025-06-03" {
+		t.Fatalf("order = %+v, want the January visit first regardless of which was inserted first", got)
 	}
 }
 

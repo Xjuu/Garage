@@ -111,9 +111,17 @@ func (s *Store) LogRepair(r Repair, deviceID string) (int64, error) {
 	return id, tx.Commit()
 }
 
-// ListRepairsForVehicle is the service history for one car, newest first —
-// used both by the worker app (type a reg, see what's been done before)
-// and the dashboard's vehicle drawer.
+// ListRepairsForVehicle is the service history for one car, newest first by
+// when the visit actually happened — used both by the worker app (type a
+// reg, see what's been done before, and prefill the spec fields from the
+// most recent visit) and the dashboard's vehicle drawer.
+//
+// Ordered by service_date, not insertion id: a live-logged visit is always
+// inserted in chronological order, but the historical import inserted rows
+// in the source spreadsheet's own row order, which is not guaranteed
+// chronological (some vehicles' sheets have a later visit's row placed
+// above an earlier one). Sorting by id would silently put the wrong visit
+// first for exactly those vehicles.
 func (s *Store) ListRepairsForVehicle(reg string) ([]Repair, error) {
 	reg = NormalizeReg(reg)
 	rows, err := s.db.Query(`
@@ -125,7 +133,7 @@ func (s *Store) ListRepairsForVehicle(reg string) ([]Repair, error) {
 		FROM repairs r
 		LEFT JOIN repairs_devices rd ON rd.id = r.device_id
 		WHERE r.vehicle_reg = ?
-		ORDER BY r.id DESC`, reg)
+		ORDER BY r.service_date DESC, r.id DESC`, reg)
 	if err != nil {
 		return nil, err
 	}
