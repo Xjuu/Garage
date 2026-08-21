@@ -36,19 +36,13 @@ func (s *Server) repairsRoutes(sub fs.FS) http.Handler {
 	// vehicle's current spec carries none of the risk of changing it, so it
 	// sits behind the normal device gate only, not the upload throttle.
 	device.HandleFunc("GET /api/repairs/upload/vehicle", s.json(s.repairsUploadGetVehicle))
-	// POST checks the upload throttle itself (see repairsUploadSaveVehicle)
-	// so it can answer with the specific "reverify" signal the frontend
-	// needs, rather than the generic 401/403 requireRepairsDevice already
-	// produces for an altogether-signed-out device.
 	device.HandleFunc("POST /api/repairs/upload/vehicle", s.json(s.repairsUploadSaveVehicle))
-	device.HandleFunc("POST /api/repairs/upload/verify", s.json(s.repairsUploadVerify))
 	protected := s.requireRepairsDevice(device)
 	mux.Handle("/api/repairs/search-vehicles", protected)
 	mux.Handle("/api/repairs/reg-exists", protected)
 	mux.Handle("/api/repairs/history", protected)
 	mux.Handle("/api/repairs/log", protected)
 	mux.Handle("/api/repairs/upload/vehicle", protected)
-	mux.Handle("/api/repairs/upload/verify", protected)
 
 	return mux
 }
@@ -277,19 +271,8 @@ func (s *Server) repairsUploadGetVehicle(r *http.Request) (any, error) {
 }
 
 // repairsUploadSaveVehicle overwrites a vehicle's spec fields outright —
-// see store.OverwriteVehicleSpec — after checking the upload throttle
-// itself, so it can answer with the specific "reverify" signal the
-// frontend watches for, distinct from every other 403 this API returns.
+// see store.OverwriteVehicleSpec.
 func (s *Server) repairsUploadSaveVehicle(r *http.Request) (any, error) {
-	deviceID, _ := s.repairsAuth.ValidateDevice(r) // already proven valid by requireRepairsDevice
-	needsVerify, err := s.db.RepairsUploadNeedsVerify(deviceID)
-	if err != nil {
-		return nil, err
-	}
-	if needsVerify {
-		return nil, fail(http.StatusForbidden, "reverify")
-	}
-
 	var body struct {
 		VehicleReg       string `json:"vehicle_reg"`
 		VIN              string `json:"vin"`
@@ -315,38 +298,6 @@ func (s *Server) repairsUploadSaveVehicle(r *http.Request) (any, error) {
 		TyreSize: body.TyreSize, RadioCode: body.RadioCode, SpareKeys: body.SpareKeys,
 	}); err != nil {
 		return nil, fail(http.StatusBadRequest, "%v", err)
-	}
-	// Only counted once the update actually went through — a rejected or
-	// failed attempt must not cost part of the budget.
-	if err := s.db.RecordRepairsUpload(deviceID); err != nil {
-		return nil, err
-	}
-	return okResponse(), nil
-}
-
-// repairsUploadVerify re-checks the PIN specifically to reset the upload
-// throttle — independent of the device's own long-lived login, which this
-// never touches.
-//
-// A wrong code here reports 403, deliberately not 401: the frontend's
-// shared api() helper treats any 401 as "this device's own session has
-// expired" and navigates back to the sign-in screen — correct for every
-// other endpoint, wrong here, where the device is already known-good and
-// only the re-typed PIN was wrong. A 403 just surfaces as an ordinary
-// error message next to the boxes, the way a mistyped code should.
-func (s *Server) repairsUploadVerify(r *http.Request) (any, error) {
-	deviceID, _ := s.repairsAuth.ValidateDevice(r)
-	var body struct {
-		Code string `json:"code"`
-	}
-	if err := decode(r, &body); err != nil {
-		return nil, err
-	}
-	if err := s.repairsAuth.CheckPIN(r, body.Code); err != nil {
-		return nil, fail(http.StatusForbidden, "%v", err)
-	}
-	if err := s.db.VerifyRepairsUpload(deviceID); err != nil {
-		return nil, err
 	}
 	return okResponse(), nil
 }

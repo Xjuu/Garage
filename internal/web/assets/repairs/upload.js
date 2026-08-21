@@ -177,7 +177,7 @@ async function loadVehicle(reg) {
   $('form').hidden = false;
 }
 
-// ── save, with the upload throttle's re-verify step ─────────────────────
+// ── save ──────────────────────────────────────────────────────────────
 
 function currentSpecBody() {
   const body = { vehicle_reg: currentReg };
@@ -203,57 +203,11 @@ $('form').addEventListener('submit', async (e) => {
     await saveVehicle();
     toast(`Updated ${currentReg.toUpperCase()}`);
   } catch (e) {
-    if (e.status === 403 && e.body && e.body.error === 'reverify') {
-      const ok = await requestReverify();
-      if (ok) {
-        try {
-          await saveVehicle();
-          toast(`Updated ${currentReg.toUpperCase()}`);
-        } catch (e2) {
-          err.textContent = e2.message;
-        }
-      }
-    } else {
-      err.textContent = e.message;
-    }
+    err.textContent = e.message;
   }
   btn.disabled = false;
   btn.textContent = 'Save changes';
 });
-
-// ── re-verify overlay ────────────────────────────────────────────────────
-
-let reverifyPins = null;
-
-function requestReverify() {
-  return new Promise((resolve) => {
-    const overlay = $('reverify-overlay');
-    const err = $('reverify-err');
-    err.textContent = '';
-    overlay.hidden = false;
-
-    const finish = (result) => {
-      overlay.hidden = true;
-      resolve(result);
-    };
-
-    $('reverify-cancel').onclick = () => finish(false);
-
-    if (!reverifyPins) reverifyPins = setupPinBoxes('reverify-boxes', attempt);
-    else reverifyPins.clear();
-
-    async function attempt(code) {
-      err.textContent = '';
-      try {
-        await api('/api/repairs/upload/verify', { method: 'POST', json: { code } });
-        finish(true);
-      } catch (e) {
-        err.textContent = e.message;
-        reverifyPins.clear();
-      }
-    }
-  });
-}
 
 hideForm();
 $('reg-input').focus();

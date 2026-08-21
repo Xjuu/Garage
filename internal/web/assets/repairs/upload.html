@@ -72,31 +72,8 @@
 
 </main>
 
-<!-- Re-verify prompt for the upload throttle — every 10 updates or 25
-     minutes, whichever comes first. A separate, smaller check from the
-     device's own year-long sign-in, which stays untouched underneath. -->
-<div class="rv-overlay" id="reverify-overlay" hidden>
-  <div class="rv-card">
-    <div class="brand"><span class="brand-mark">R</span> Confirm it's you</div>
-    <p class="sub">For extra safety, bulk updates ask for the code again every 10 changes or 25 minutes. Your sign-in itself isn't affected.</p>
-    <div class="pin-boxes" id="reverify-boxes">
-      <div class="pin-box"></div>
-      <div class="pin-box"></div>
-      <div class="pin-box"></div>
-      <div class="pin-box"></div>
-      <div class="pin-box"></div>
-      <div class="pin-box"></div>
-      <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6"
-             autocomplete="one-time-code" class="pin-hidden-input" aria-label="6-digit code">
-    </div>
-    <div class="login-err" id="reverify-err" role="alert"></div>
-    <button class="btn" id="reverify-cancel" type="button">Cancel</button>
-  </div>
-</div>
-
 <div class="toasts" id="toasts"></div>
 
-<script src="/static/repairs/pinbox.js"></script>
 <script src="/static/repairs/upload.js"></script>
 </body>
 </html>
