@@ -120,6 +120,7 @@ function hideHistoryAndForm() {
   currentReg = '';
   $('history-section').hidden = true;
   $('form').hidden = true;
+  prefillSpec(null);
 }
 
 async function loadHistory(reg) {
@@ -138,7 +139,31 @@ async function loadHistory(reg) {
     ? rows.map(renderVisit).join('')
     : '<div class="rp-empty">Nothing logged for this vehicle yet — this will be its first visit.</div>';
 
+  // The most recent visit already carries a full spec snapshot (every visit
+  // does — see LogRepair) — reuse it instead of asking the crew to retype a
+  // VIN or radio code that's already on file for a car that's been in before.
+  prefillSpec(rows[0] || null);
   $('form').hidden = false;
+}
+
+const specFieldIds = {
+  vin: 'vin', make: 'make', model: 'model', colour: 'colour',
+  cylinder_capacity: 'cylinder-capacity', spare_keys: 'spare-keys',
+  fuel_type: 'fuel-type', engine_size: 'engine-size', engine_number: 'engine-number',
+  tyre_size: 'tyre-size', radio_code: 'radio-code', oil_amount: 'oil-amount',
+};
+
+function prefillSpec(latest) {
+  for (const [key, id] of Object.entries(specFieldIds)) {
+    $(id).value = latest ? (latest[key] || '') : '';
+  }
+  const note = $('spec-prefill-note');
+  if (latest) {
+    note.hidden = false;
+    note.textContent = `Filled in from the visit on ${whenLocalShort(latest.service_date)} — change anything that's out of date.`;
+  } else {
+    note.hidden = true;
+  }
 }
 
 function renderVisit(v) {

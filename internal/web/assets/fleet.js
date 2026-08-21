@@ -106,11 +106,11 @@ async function loadVehicleDetail() {
 
   $('veh-repairs').innerHTML = (d.repairs || []).length
     ? d.repairs.map((r) => `
-        <tr>
+        <tr class="${r.timing_belt_changed ? 'notable' : ''}">
           <td class="mono">${dash(r.service_date)}</td>
-          <td>${esc(serviceTypeLabel(r))}</td>
-          <td class="num">${r.mileage ? int(r.mileage) : '—'}</td>
-          <td>${r.timing_belt_changed ? '<span class="pill">Changed</span>' : ''}</td>
+          <td class="strong">${esc(serviceTypeLabel(r))}</td>
+          <td class="num">${r.mileage ? int(r.mileage) + ' mi' : '—'}</td>
+          <td>${r.timing_belt_changed ? '<span class="pill">Timing belt</span>' : ''}</td>
           <td class="truncate" title="${esc(r.description)}">${dash(r.description)}</td>
         </tr>`).join('')
     : '<tr><td colspan="5" class="empty">No repairs logged</td></tr>';
@@ -134,25 +134,32 @@ function serviceTypeLabel(r) {
 }
 
 // Every spec field is optional and only ever arrives once a repair visit
-// has supplied it — the whole panel stays hidden until at least one exists,
-// rather than showing a vehicle's page full of empty "—" rows by default.
+// has supplied it — the whole grid stays hidden until at least one exists,
+// rather than showing a vehicle's page full of empty cards by default.
 function renderVehicleSpec(v, lastTimingBelt, hasTimingBelt) {
-  const rows = [
-    ['VIN / chassis number', v.vin],
-    ['Colour', v.colour],
-    ['Cylinder capacity', v.cylinder_capacity],
-    ['Fuel type', v.fuel_type],
-    ['Engine size', v.engine_size],
-    ['Engine number', v.engine_number],
-    ['Tyre size', v.tyre_size],
-    ['Radio code', v.radio_code],
-    ['Spare keys', v.spare_keys],
-    ['Last timing belt change', hasTimingBelt ? lastTimingBelt : ''],
-  ].filter(([, val]) => val);
+  const card = (k, val, opts = {}) => {
+    if (!val) return '';
+    const cls = ['spec-card', opts.highlight ? 'highlight' : ''].filter(Boolean).join(' ');
+    const vcls = ['v', opts.mono ? 'mono' : ''].filter(Boolean).join(' ');
+    return `<div class="${cls}"><div class="k">${esc(k)}</div><div class="${vcls}">${esc(val)}</div></div>`;
+  };
 
-  $('veh-spec-section').hidden = rows.length === 0;
-  $('veh-spec').innerHTML = rows.map(([k, val]) =>
-    `<div><span class="muted">${esc(k)}</span> ${esc(val)}</div>`).join('');
+  // The one fact with a real maintenance interval behind it leads the
+  // grid, set apart with the same ink-border treatment .tile.alert uses
+  // for a number worth noticing — everything else is plain reference info.
+  $('veh-spec').innerHTML = [
+    card('Last timing belt change', hasTimingBelt ? lastTimingBelt : '', { highlight: true, mono: true }),
+    card('Colour', v.colour),
+    card('Fuel type', v.fuel_type),
+    card('Cylinder capacity', v.cylinder_capacity),
+    card('Engine size', v.engine_size),
+    card('Tyre size', v.tyre_size),
+    card('Spare keys', v.spare_keys),
+    card('VIN / chassis number', v.vin, { mono: true }),
+    card('Engine number', v.engine_number, { mono: true }),
+    card('Radio code', v.radio_code, { mono: true }),
+  ].join('');
+  $('veh-spec-section').hidden = !$('veh-spec').innerHTML;
 }
 
 // ── part detail ───────────────────────────────────────────────────────────

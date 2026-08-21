@@ -61,6 +61,14 @@
 }
 .rp-divider .muted { text-transform: none; font-weight: 400; letter-spacing: normal; }
 
+/* Tells the crew the fields below weren't typed from scratch — they came
+   from this car's last visit and are just waiting to be corrected. */
+.rp-note {
+  font-size: 12.5px; color: var(--g5);
+  background: var(--g05); border: 1px solid var(--g2); border-radius: var(--radius-sm);
+  padding: 8px 12px; margin-top: -4px;
+}
+
 .rp-submit { font-size: 16px; padding: 13px; width: 100%; }
 
 @media (max-width: 480px) {

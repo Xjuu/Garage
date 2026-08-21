@@ -237,6 +237,30 @@ input::placeholder { color: var(--g4); }
 .tile.alert { border-color: var(--flag); }
 .tile.alert .v { color: var(--flag); }
 
+/* Vehicle spec facts — same "bordered card, small caps label, bold value"
+   language as .tile above, just sized for words (a VIN, a tyre size)
+   instead of a headline number. */
+.spec-grid {
+  display: grid; gap: 10px; margin-bottom: 26px;
+  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+}
+.spec-card {
+  border: 1px solid var(--g2); border-radius: var(--radius-sm);
+  padding: 11px 14px;
+}
+.spec-card .k {
+  font-size: 10px; font-weight: 700; color: var(--g4);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.spec-card .v {
+  font-size: 15px; font-weight: 700; margin-top: 3px; word-break: break-word;
+}
+.spec-card .v.mono { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+/* The one spec fact with a real maintenance interval behind it — set apart
+   from the purely informational cards around it, the same way .pc-picked
+   once marked "the settled, important choice" with an ink border. */
+.spec-card.highlight { border-color: var(--ink); background: var(--g05); }
+
 /* ── Tables ─────────────────────────────────────────────────────────── */
 
 .panel {
@@ -267,6 +291,9 @@ tbody tr:last-child td { border-bottom: 0; }
 tbody tr.clickable { cursor: pointer; }
 tbody tr.clickable:hover td { background: var(--g05); }
 tbody tr.flagged td:first-child { box-shadow: inset 3px 0 0 var(--flag); }
+/* Same left-edge marker as .flagged, in ink rather than the reserved
+   alert red — this flags a row as notable, not as a problem. */
+tbody tr.notable td:first-child { box-shadow: inset 3px 0 0 var(--ink); }
 
 td.num, th.num {
   text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;
