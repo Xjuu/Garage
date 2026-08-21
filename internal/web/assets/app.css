@@ -545,14 +545,22 @@ td.strong { font-weight: 700; }
   font-family: var(--mono); color: var(--ink);
 }
 .pin-box.active { border-color: var(--ink); }
-.pin-hidden-input {
+/* input.pin-hidden-input, not just .pin-hidden-input: the generic
+   input[type="text"] rule above (an attribute selector, so it counts as
+   an element selector *plus* one more) is more specific than a bare class
+   selector, so it was winning regardless of source order — its opaque
+   border, background and padding rendered right over the six display
+   boxes as one solid rectangle, hiding all of them at once. Matching its
+   specificity here, with this rule still coming later, is what actually
+   makes the override take. */
+input.pin-hidden-input {
   position: absolute; inset: 0; z-index: 1;
   width: 100%; height: 100%; padding: 0; margin: 0; border: none;
   background: transparent; color: transparent; caret-color: transparent;
   font-size: 16px; /* keeps iOS from zooming the page in on focus */
   cursor: text;
 }
-.pin-hidden-input:focus { outline: none; }
+input.pin-hidden-input:focus { outline: none; }
 
 .totp-panel .sub { margin-bottom: 18px; }
 .totp-qr {
