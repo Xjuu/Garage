@@ -33,10 +33,21 @@ function setupPinBoxes(containerId, onComplete) {
   function code() {
     return hidden.value;
   }
+  // Deferred a frame: calling .focus() in the same synchronous tick that
+  // just unhid the field's own container (see the upload page's re-verify
+  // overlay, which starts out hidden and appears on demand) is a known
+  // cross-browser flake — the browser hasn't necessarily finished laying
+  // the element out yet, and focus() on something not yet paintable is
+  // quietly a no-op. The sign-in page's field is visible from first paint,
+  // so this never mattered there; it matters a great deal the moment a
+  // field starts hidden and is shown later.
+  function focus() {
+    requestAnimationFrame(() => hidden.focus());
+  }
   function clear() {
     hidden.value = '';
     render();
-    hidden.focus();
+    focus();
   }
 
   hidden.addEventListener('input', () => {
@@ -46,6 +57,6 @@ function setupPinBoxes(containerId, onComplete) {
   });
 
   render();
-  hidden.focus();
-  return { clear, code };
+  focus();
+  return { clear, code, focus };
 }

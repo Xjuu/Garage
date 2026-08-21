@@ -83,6 +83,7 @@ const ctx = vm.createContext({
   document: { getElementById: (id) => store[id] || null },
   location: { href: '', reloaded: false },
   setTimeout, clearTimeout,
+  requestAnimationFrame: (fn) => setTimeout(fn, 0),
   fetch: fakeFetch,
   JSON, Object, Array, Promise,
 });
@@ -113,6 +114,7 @@ function typeCode(code) {
 
 (async () => {
   ok(errors.length === 0, 'pinbox.js and pin.js load without throwing: ' + errors.join('; '));
+  await wait(10); // focus is deferred a frame — see pinbox.js's own comment on why
   ok(pinGroup.hidden.focused === true, 'the code field is focused as soon as the page loads');
 
   // ── wrong code ──

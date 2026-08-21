@@ -137,6 +137,10 @@ const ctx = vm.createContext({
   },
   location: { href: '' },
   setTimeout, clearTimeout,
+  // A real browser API pinbox.js relies on to defer .focus() until after
+  // layout — not a Node global, so stubbed the same way as the other
+  // browser-only pieces below.
+  requestAnimationFrame: (fn) => setTimeout(fn, 0),
   fetch: fakeFetch,
   Math, JSON, Object, Array, Number, String, Boolean, Date, Set, Map, Promise,
   encodeURIComponent, decodeURIComponent, URL,
@@ -186,6 +190,7 @@ function typeCode(groupId, code) {
   // top-level functions.
   const pinTest = ctx.setupPinBoxes('pin-boxes', (code) => { completedWith = code; });
 
+  await wait(10); // focus is deferred a frame — see pinbox.js's own comment on why
   ok(group.hidden.focused === true, 'the real input is focused as soon as the widget is set up');
 
   typeCode('pin-boxes', '1122');
@@ -199,6 +204,7 @@ function typeCode(groupId, code) {
   pinTest.clear();
   ok(group.hidden.value === '' && group.boxes.every((b) => b.textContent === ''),
     'clear() empties the input and every display box');
+  await wait(10);
   ok(group.hidden.focused === true, 'clear() refocuses the input');
 
   // Paste support needs no special handling at all now — a paste into the
