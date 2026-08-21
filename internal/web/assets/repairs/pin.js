@@ -3,19 +3,10 @@
 const $ = (id) => document.getElementById(id);
 
 const form = $('form');
-const code = $('code');
 const err = $('err');
 const submit = $('submit');
 
-// Auto-submits once 6 digits are typed — a shared shop code entered on a
-// shared device, not something worth an extra tap to confirm.
-code.addEventListener('input', () => {
-  code.value = code.value.replace(/\D/g, '').slice(0, 6);
-  if (code.value.length === 6) form.requestSubmit();
-});
-
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
+async function trySubmit(code) {
   err.textContent = '';
   submit.disabled = true;
   submit.textContent = 'Checking…';
@@ -23,16 +14,26 @@ form.addEventListener('submit', async (e) => {
     const res = await fetch('/api/repairs/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: code.value }),
+      body: JSON.stringify({ code }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'incorrect code');
-    location.href = '/';
+    // Reloading, not a hardcoded redirect to "/": this same page is also
+    // shown for /upload when a device isn't signed in yet, and the server
+    // decides which real page to serve for whatever URL is already in the
+    // address bar once the device cookie proves it's authenticated.
+    location.reload();
   } catch (e) {
     err.textContent = e.message;
-    code.value = '';
-    code.focus();
+    pin.clear();
   }
   submit.disabled = false;
   submit.textContent = 'Continue';
+}
+
+const pin = setupPinBoxes('pin-boxes', trySubmit);
+
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  trySubmit(pin.code());
 });

@@ -268,3 +268,121 @@ func TestRecentRepairsIncludesDeviceLabel(t *testing.T) {
 		t.Fatalf("DeviceName = %q, want the registered label", got[0].DeviceName)
 	}
 }
+
+// ── vehicle spec overwrite ───────────────────────────────────────────────
+
+// OverwriteVehicleSpec is the "correct this vehicle's record" tool behind
+// /upload — unlike the partial update a repair visit applies, it must be
+// able to deliberately blank a field back out, not just add or change one.
+func TestOverwriteVehicleSpecCanBlankAField(t *testing.T) {
+	db := open(t)
+	if err := db.UpdateVehicleSpec("AB12CDE", VehicleSpecPatch{Colour: "Silver", VIN: "OLDVIN123"}); err != nil {
+		t.Fatalf("UpdateVehicleSpec: %v", err)
+	}
+	v, err := db.GetVehicle("AB12CDE")
+	if err != nil || v.Colour != "Silver" || v.VIN != "OLDVIN123" {
+		t.Fatalf("seed state: %v %+v", err, v)
+	}
+
+	// Overwrite with a corrected VIN and a deliberately blanked colour.
+	if err := db.OverwriteVehicleSpec("AB12CDE", VehicleSpecPatch{Colour: "", VIN: "CORRECTED456"}); err != nil {
+		t.Fatalf("OverwriteVehicleSpec: %v", err)
+	}
+	v, err = db.GetVehicle("AB12CDE")
+	if err != nil {
+		t.Fatalf("GetVehicle: %v", err)
+	}
+	if v.VIN != "CORRECTED456" {
+		t.Fatalf("VIN = %q, want the corrected value", v.VIN)
+	}
+	if v.Colour != "" {
+		t.Fatalf("Colour = %q, want it cleared — OverwriteVehicleSpec must be able to blank a field, unlike UpdateVehicleSpec", v.Colour)
+	}
+}
+
+func TestOverwriteVehicleSpecRejectsEmptyRegistration(t *testing.T) {
+	db := open(t)
+	if err := db.OverwriteVehicleSpec("", VehicleSpecPatch{Colour: "Silver"}); err == nil {
+		t.Fatalf("expected an empty registration to be rejected")
+	}
+}
+
+// ── upload throttle ──────────────────────────────────────────────────────
+
+func TestRepairsUploadNeedsVerifyForAnUnknownOrFreshDevice(t *testing.T) {
+	db := open(t)
+	needs, err := db.RepairsUploadNeedsVerify("never-seen")
+	if err != nil || !needs {
+		t.Fatalf("an unregistered device must need verification: needs=%v err=%v", needs, err)
+	}
+}
+
+func TestRegisterRepairsDeviceUnlocksUploadImmediately(t *testing.T) {
+	db := open(t)
+	if err := db.RegisterRepairsDevice("dev-1", "tablet"); err != nil {
+		t.Fatalf("RegisterRepairsDevice: %v", err)
+	}
+	needs, err := db.RepairsUploadNeedsVerify("dev-1")
+	if err != nil || needs {
+		t.Fatalf("typing the PIN just now should have unlocked uploads too: needs=%v err=%v", needs, err)
+	}
+}
+
+func TestRepairsUploadNeedsVerifyAfterTenUpdates(t *testing.T) {
+	db := open(t)
+	db.RegisterRepairsDevice("dev-1", "tablet")
+
+	for i := 0; i < 9; i++ {
+		if err := db.RecordRepairsUpload("dev-1"); err != nil {
+			t.Fatalf("RecordRepairsUpload: %v", err)
+		}
+		if needs, err := db.RepairsUploadNeedsVerify("dev-1"); err != nil || needs {
+			t.Fatalf("after %d update(s), needs=%v err=%v, want still unlocked", i+1, needs, err)
+		}
+	}
+	// The 10th update spends the last of the budget.
+	if err := db.RecordRepairsUpload("dev-1"); err != nil {
+		t.Fatalf("RecordRepairsUpload: %v", err)
+	}
+	needs, err := db.RepairsUploadNeedsVerify("dev-1")
+	if err != nil || !needs {
+		t.Fatalf("after 10 updates, needs=%v err=%v, want re-verification required", needs, err)
+	}
+}
+
+func TestVerifyRepairsUploadResetsTheBudget(t *testing.T) {
+	db := open(t)
+	db.RegisterRepairsDevice("dev-1", "tablet")
+	for i := 0; i < 10; i++ {
+		db.RecordRepairsUpload("dev-1")
+	}
+	if needs, _ := db.RepairsUploadNeedsVerify("dev-1"); !needs {
+		t.Fatalf("setup: expected the budget to be spent")
+	}
+
+	if err := db.VerifyRepairsUpload("dev-1"); err != nil {
+		t.Fatalf("VerifyRepairsUpload: %v", err)
+	}
+	needs, err := db.RepairsUploadNeedsVerify("dev-1")
+	if err != nil || needs {
+		t.Fatalf("after re-verifying, needs=%v err=%v, want unlocked again", needs, err)
+	}
+}
+
+// The 25-minute window is the other trigger, independent of the update
+// count — simulated by backdating upload_unlocked_at directly, since the
+// store has no clock to inject for a real-time test.
+func TestRepairsUploadNeedsVerifyAfterTheTimeWindow(t *testing.T) {
+	db := open(t)
+	db.RegisterRepairsDevice("dev-1", "tablet")
+
+	old := time.Now().Add(-26 * time.Minute).UTC().Format(time.RFC3339)
+	if _, err := db.db.Exec(`UPDATE repairs_devices SET upload_unlocked_at = ? WHERE id = ?`, old, "dev-1"); err != nil {
+		t.Fatalf("backdating unlocked_at: %v", err)
+	}
+
+	needs, err := db.RepairsUploadNeedsVerify("dev-1")
+	if err != nil || !needs {
+		t.Fatalf("after the 25-minute window, needs=%v err=%v, want re-verification required", needs, err)
+	}
+}

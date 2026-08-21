@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ── repairs ──────────────────────────────────────────────────────────────
@@ -286,6 +287,42 @@ func updateVehicleSpecTx(tx *sql.Tx, reg string, p VehicleSpecPatch) error {
 	return err
 }
 
+// OverwriteVehicleSpec replaces every spec field with exactly what's given,
+// including deliberately blanking one out — unlike UpdateVehicleSpec's
+// partial-update semantics (used when a repair visit only mentions some
+// fields and must never erase what an earlier visit already recorded),
+// this backs the "correct this vehicle's record" upload tool, where the
+// operator is looking straight at the current values and a field they
+// clear is a conscious choice, not an accidental gap.
+func (s *Store) OverwriteVehicleSpec(reg string, p VehicleSpecPatch) error {
+	reg = NormalizeReg(reg)
+	if reg == "" {
+		return fmt.Errorf("registration is required")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := ensureVehicleRegistered(tx, reg); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`
+		UPDATE vehicles SET
+			make = ?, model = ?, vin = ?, colour = ?, cylinder_capacity = ?,
+			fuel_type = ?, engine_size = ?, engine_number = ?, tyre_size = ?,
+			radio_code = ?, spare_keys = ?
+		WHERE registration = ?`,
+		strings.TrimSpace(p.Make), strings.TrimSpace(p.Model), strings.TrimSpace(p.VIN),
+		strings.TrimSpace(p.Colour), strings.TrimSpace(p.CylinderCapacity), strings.TrimSpace(p.FuelType),
+		strings.TrimSpace(p.EngineSize), strings.TrimSpace(p.EngineNumber), strings.TrimSpace(p.TyreSize),
+		strings.TrimSpace(p.RadioCode), strings.TrimSpace(p.SpareKeys), reg)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ── devices ──────────────────────────────────────────────────────────────
 
 type RepairsDevice struct {
@@ -296,12 +333,17 @@ type RepairsDevice struct {
 	LastSeen  string `json:"last_seen"`
 }
 
+// RegisterRepairsDevice runs every time the PIN is typed in correctly —
+// which is also exactly the moment the upload throttle's budget should
+// reset, since typing the PIN again is a fresh proof of who's using the
+// device.
 func (s *Store) RegisterRepairsDevice(id, label string) error {
 	_, err := s.db.Exec(`
-		INSERT INTO repairs_devices (id, label, active, first_seen, last_seen)
-		VALUES (?, ?, 1, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET last_seen = excluded.last_seen`,
-		id, label, now(), now())
+		INSERT INTO repairs_devices (id, label, active, first_seen, last_seen, upload_count, upload_unlocked_at)
+		VALUES (?, ?, 1, ?, ?, 0, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			last_seen = excluded.last_seen, upload_count = 0, upload_unlocked_at = excluded.upload_unlocked_at`,
+		id, label, now(), now(), now())
 	return err
 }
 
@@ -341,5 +383,59 @@ func (s *Store) ListRepairsDevices() ([]RepairsDevice, error) {
 
 func (s *Store) RevokeRepairsDevice(id string) error {
 	_, err := s.db.Exec(`UPDATE repairs_devices SET active = 0 WHERE id = ?`, id)
+	return err
+}
+
+// ── upload throttle ──────────────────────────────────────────────────────
+//
+// The bulk vehicle-data upload tool is more consequential than logging one
+// visit — a stolen or left-unlocked device could otherwise silently rewrite
+// a lot of vehicle records — so on top of the normal remembered-device
+// login it re-asks for the PIN every uploadMaxUpdates updates or
+// uploadWindow, whichever comes first.
+
+const (
+	uploadMaxUpdates = 10
+	uploadWindow     = 25 * time.Minute
+)
+
+// RepairsUploadNeedsVerify reports whether this device has to re-enter the
+// PIN before its next upload — either it has never been unlocked for
+// uploads at all, used up its budget of updates, or the window since it
+// last proved the PIN has run out.
+func (s *Store) RepairsUploadNeedsVerify(deviceID string) (bool, error) {
+	var count int
+	var unlockedAt string
+	err := s.db.QueryRow(`SELECT upload_count, upload_unlocked_at FROM repairs_devices WHERE id = ?`, deviceID).
+		Scan(&count, &unlockedAt)
+	if err == sql.ErrNoRows {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if unlockedAt == "" || count >= uploadMaxUpdates {
+		return true, nil
+	}
+	t, err := time.Parse(time.RFC3339, unlockedAt)
+	if err != nil {
+		return true, nil // an unreadable timestamp is no proof of a recent unlock
+	}
+	return time.Since(t) >= uploadWindow, nil
+}
+
+// RecordRepairsUpload counts one update against the device's budget —
+// called after each successful upload, never before, so a rejected or
+// failed attempt doesn't spend it.
+func (s *Store) RecordRepairsUpload(deviceID string) error {
+	_, err := s.db.Exec(`UPDATE repairs_devices SET upload_count = upload_count + 1 WHERE id = ?`, deviceID)
+	return err
+}
+
+// VerifyRepairsUpload resets the upload budget after the PIN is re-entered
+// specifically for the upload tool — independent of the device's main
+// 365-day login, which is untouched by this.
+func (s *Store) VerifyRepairsUpload(deviceID string) error {
+	_, err := s.db.Exec(`UPDATE repairs_devices SET upload_count = 0, upload_unlocked_at = ? WHERE id = ?`, now(), deviceID)
 	return err
 }

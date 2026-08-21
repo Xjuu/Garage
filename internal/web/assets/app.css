@@ -527,6 +527,18 @@ td.strong { font-weight: 700; }
   margin-top: 12px; min-height: 18px;
 }
 
+/* Six single-digit boxes standing in for one text input — a PIN reads
+   faster as six distinct slots than as a plain field, and each box filling
+   in as you type gives the same "it's working" feedback a longer OTP form
+   gets from a full-width field. */
+.pin-boxes { display: flex; gap: 8px; justify-content: center; }
+.pin-box {
+  width: 100%; max-width: 46px; aspect-ratio: 1; padding: 0;
+  text-align: center; font-size: 22px; font-weight: 700;
+  font-family: var(--mono); letter-spacing: 0;
+}
+.pin-box:focus { border-color: var(--ink); background: var(--paper); }
+
 .totp-panel .sub { margin-bottom: 18px; }
 .totp-qr {
   display: block; width: 200px; height: 200px; margin: 0 auto 18px;

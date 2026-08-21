@@ -12,20 +12,26 @@
 <div class="login-wrap">
   <div class="login-card">
     <div class="brand"><span class="brand-mark">R</span> Repairs log</div>
-    <p class="sub">Enter the shared 6-digit code to log a service or repair.</p>
+    <p class="sub">Enter the shared 6-digit code to continue.</p>
 
     <form id="form">
       <div class="field">
-        <label for="code">6-digit code</label>
-        <input type="text" id="code" inputmode="numeric" pattern="[0-9]*"
-               autocomplete="one-time-code" maxlength="6" required autofocus
-               placeholder="000000">
+        <label>6-digit code</label>
+        <div class="pin-boxes" id="pin-boxes">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" class="pin-box" autocomplete="one-time-code">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" class="pin-box">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" class="pin-box">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" class="pin-box">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" class="pin-box">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" class="pin-box">
+        </div>
       </div>
       <button class="btn solid" type="submit" id="submit">Continue</button>
       <div class="login-err" id="err" role="alert"></div>
     </form>
   </div>
 </div>
+<script src="/static/repairs/pinbox.js"></script>
 <script src="/static/repairs/pin.js"></script>
 </body>
 </html>

@@ -212,11 +212,18 @@ CREATE INDEX IF NOT EXISTS idx_repairs_reg ON repairs(vehicle_reg);
 -- deactivating the row here, not rotating a shared key that would sign
 -- every device out at once instead of one.
 CREATE TABLE IF NOT EXISTS repairs_devices (
-  id          TEXT PRIMARY KEY,
-  label       TEXT NOT NULL DEFAULT '',
-  active      INTEGER NOT NULL DEFAULT 1,
-  first_seen  TEXT NOT NULL,
-  last_seen   TEXT NOT NULL
+  id                 TEXT PRIMARY KEY,
+  label              TEXT NOT NULL DEFAULT '',
+  active             INTEGER NOT NULL DEFAULT 1,
+  first_seen         TEXT NOT NULL,
+  last_seen          TEXT NOT NULL,
+  -- The bulk vehicle-data upload tool re-asks for the PIN every 10 updates
+  -- or 25 minutes, whichever comes first, on top of the device's normal
+  -- year-long remembered login — these two track that separately, reset
+  -- every time the PIN is actually re-entered (see RegisterRepairsDevice
+  -- and VerifyRepairsUpload).
+  upload_count       INTEGER NOT NULL DEFAULT 0,
+  upload_unlocked_at TEXT NOT NULL DEFAULT ''
 );
 
 -- Training ------------------------------------------------------------------
@@ -327,6 +334,10 @@ func migrate(db *sql.DB) error {
 		},
 		"repairs": {
 			"engine_number": "ALTER TABLE repairs ADD COLUMN engine_number TEXT NOT NULL DEFAULT ''",
+		},
+		"repairs_devices": {
+			"upload_count":       "ALTER TABLE repairs_devices ADD COLUMN upload_count INTEGER NOT NULL DEFAULT 0",
+			"upload_unlocked_at": "ALTER TABLE repairs_devices ADD COLUMN upload_unlocked_at TEXT NOT NULL DEFAULT ''",
 		},
 	}
 	for table, added := range tables {

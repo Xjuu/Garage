@@ -71,6 +71,23 @@
 
 .rp-submit { font-size: 16px; padding: 13px; width: 100%; }
 
+/* Re-verify prompt for the upload throttle — a small dimmed overlay, not a
+   navigation away from the form the crew is mid-way through filling in. */
+.rv-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(0, 0, 0, .5);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.rv-card {
+  width: 100%; max-width: 360px; background: var(--paper);
+  border: 1px solid var(--g2); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 28px 26px; text-align: center;
+}
+.rv-card .brand { font-size: 20px; justify-content: center; margin-bottom: 8px; }
+.rv-card .sub { color: var(--g4); font-size: 13px; margin-bottom: 20px; }
+.rv-card .pin-boxes { margin-bottom: 4px; }
+.rv-card .btn { width: 100%; justify-content: center; margin-top: 16px; }
+
 @media (max-width: 480px) {
   .rp-main { padding-top: 12px; }
 }
