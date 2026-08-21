@@ -1,49 +1,51 @@
 'use strict';
 
-/* Wires up a row of 6 single-digit inputs as one PIN entry control —
-   shared by the sign-in screen and the bulk-upload tool's re-verify
-   prompt, since both need exactly the same behaviour: typing a digit
-   advances focus, backspace on an empty box steps back, pasting a full
-   6-digit code fills every box in one go, and the moment all 6 are
-   filled onComplete(code) fires on its own — nobody has to find a button.
+/* A 6-digit PIN control that LOOKS like six boxes but is backed by one
+   real, invisible text input covering the whole row — the same technique
+   iOS's own passcode screen and most banking-app OTP entry use, and for a
+   specific reason: six separate focusable inputs with JS jumping focus
+   between them on every keystroke is a well-known cross-browser/mobile
+   trap. Autofill suggestion bars, predictive text and IME composition
+   routinely interfere with a programmatic .focus() fired from inside the
+   very 'input' event handler that's still processing a keystroke — the
+   failure mode is exactly "typing does nothing" or "never advances to the
+   next box". With one real input there's nothing to hand focus between:
+   it behaves like any ordinary text field, and native backspace and paste
+   both work for free instead of needing their own handlers.
 
-   Returns { clear(), code() } so the caller can wipe the boxes after a
-   wrong code and read the current value if needed. */
+   Shared by the sign-in screen and the bulk-upload tool's re-verify
+   prompt. Returns { clear(), code() } so the caller can wipe the field
+   after a wrong code and read the current value if needed. */
 function setupPinBoxes(containerId, onComplete) {
-  const boxes = Array.from(document.querySelectorAll('#' + containerId + ' .pin-box'));
+  const container = document.getElementById(containerId);
+  const boxes = Array.from(container.querySelectorAll('.pin-box'));
+  const hidden = container.querySelector('.pin-hidden-input');
+
+  function render() {
+    const digits = hidden.value.split('');
+    boxes.forEach((b, i) => { b.textContent = digits[i] || ''; });
+    // The box lined up with wherever typing will land next, so the row
+    // still reads left-to-right as you go even with only one real input.
+    const at = digits.length < boxes.length ? digits.length : boxes.length - 1;
+    boxes.forEach((b, i) => b.classList.toggle('active', i === at));
+  }
 
   function code() {
-    return boxes.map((b) => b.value).join('');
-  }
-  function maybeComplete() {
-    const c = code();
-    if (/^\d{6}$/.test(c)) onComplete(c);
+    return hidden.value;
   }
   function clear() {
-    boxes.forEach((b) => { b.value = ''; });
-    boxes[0].focus();
+    hidden.value = '';
+    render();
+    hidden.focus();
   }
 
-  boxes.forEach((box, i) => {
-    box.addEventListener('input', () => {
-      box.value = box.value.replace(/\D/g, '').slice(-1);
-      if (box.value && i < boxes.length - 1) boxes[i + 1].focus();
-      maybeComplete();
-    });
-    box.addEventListener('keydown', (e) => {
-      if (e.key === 'Backspace' && !box.value && i > 0) boxes[i - 1].focus();
-    });
-    box.addEventListener('paste', (e) => {
-      const text = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '');
-      if (!text) return;
-      e.preventDefault();
-      for (let j = 0; j < boxes.length; j++) boxes[j].value = text[j] || '';
-      const last = Math.min(text.length, boxes.length) - 1;
-      if (last >= 0) boxes[last].focus();
-      maybeComplete();
-    });
+  hidden.addEventListener('input', () => {
+    hidden.value = hidden.value.replace(/\D/g, '').slice(0, boxes.length);
+    render();
+    if (hidden.value.length === boxes.length) onComplete(hidden.value);
   });
 
-  boxes[0].focus();
+  render();
+  hidden.focus();
   return { clear, code };
 }

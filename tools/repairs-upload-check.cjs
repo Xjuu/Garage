@@ -42,7 +42,23 @@ function makeEl(id) {
   };
 }
 
-function makePinBox() {
+// pinbox.js is backed by one real input covering the whole row (see its
+// own comment for why) plus 6 display-only boxes it writes digits into —
+// modelled here as a fake container exposing exactly the two lookups
+// setupPinBoxes performs: querySelectorAll('.pin-box') for the display
+// boxes, querySelector('.pin-hidden-input') for the one real field.
+function makeDisplayBox() {
+  const classes = new Set();
+  return {
+    textContent: '',
+    classList: {
+      add: (c) => classes.add(c), remove: (c) => classes.delete(c),
+      toggle: (c, on) => { (on ?? !classes.has(c)) ? classes.add(c) : classes.delete(c); },
+      contains: (c) => classes.has(c),
+    },
+  };
+}
+function makeHiddenInput() {
   const listeners = {};
   return {
     value: '',
@@ -51,16 +67,22 @@ function makePinBox() {
     focus() { this.focused = true; },
   };
 }
+function makePinGroup() {
+  const boxes = Array.from({ length: 6 }, makeDisplayBox);
+  const hidden = makeHiddenInput();
+  return {
+    boxes, hidden,
+    querySelectorAll(sel) { return sel === '.pin-box' ? boxes : []; },
+    querySelector(sel) { return sel === '.pin-hidden-input' ? hidden : null; },
+  };
+}
 
 const store = {};
 ids.forEach((i) => { store[i] = makeEl(i); });
 
-// The 6 boxes inside each PIN group are anonymous in the markup (shared
-// class, no individual ids) — modelled the same way the real DOM would
-// resolve document.querySelectorAll('#container .pin-box').
 const pinGroups = {
-  'pin-boxes': Array.from({ length: 6 }, makePinBox),
-  'reverify-boxes': Array.from({ length: 6 }, makePinBox),
+  'pin-boxes': makePinGroup(),
+  'reverify-boxes': makePinGroup(),
 };
 
 const fetchCalls = [];
@@ -107,12 +129,8 @@ const errors = [];
 const ctx = vm.createContext({
   console,
   document: {
-    getElementById: (id) => store[id] || null,
-    querySelectorAll: (sel) => {
-      const m = sel.match(/^#([\w-]+) \.pin-box$/);
-      if (m && pinGroups[m[1]]) return pinGroups[m[1]];
-      return [];
-    },
+    getElementById: (id) => pinGroups[id] || store[id] || null,
+    querySelectorAll: () => [],
     querySelector: () => null,
     createElement: () => makeEl('tmp'),
     cookie: 'goldstar_repairs_csrf=test-csrf-token',
@@ -140,14 +158,15 @@ function ok(cond, label) {
   if (!cond) failed = true;
 }
 
-// Types a digit into each box of a pin group the way a real keystroke would
-// — set .value then fire 'input' — so the widget's own advance-focus /
-// completion logic runs exactly as it would in a browser.
+// Types into the one real hidden input a digit at a time, the way real
+// keystrokes would — appending to .value then firing 'input' — so the
+// widget's own digit-filtering / completion logic runs exactly as it
+// would in a browser.
 function typeCode(groupId, code) {
-  const boxes = pinGroups[groupId];
-  for (let i = 0; i < code.length; i++) {
-    boxes[i].value = code[i];
-    boxes[i].fire('input');
+  const { hidden } = pinGroups[groupId];
+  for (const digit of code) {
+    hidden.value += digit;
+    hidden.fire('input');
   }
 }
 
@@ -155,7 +174,11 @@ function typeCode(groupId, code) {
   ok(errors.length === 0, 'pinbox.js and upload.js load without throwing: ' + errors.join('; '));
 
   // ── pinbox widget behaviour, exercised through the sign-in group ──
-  const boxes = pinGroups['pin-boxes'];
+  // One real input backs the whole row (see pinbox.js's own comment for
+  // why, and repairs-app-check.cjs for the regression this design fixes) —
+  // these checks drive it the way an actual keystroke or paste would and
+  // confirm the display boxes and completion callback follow along.
+  const group = pinGroups['pin-boxes'];
   let completedWith = null;
   // setupPinBoxes is declared inside the vm context (pinbox.js), not in this
   // outer Node scope — reached via the context object it was attached to,
@@ -163,29 +186,36 @@ function typeCode(groupId, code) {
   // top-level functions.
   const pinTest = ctx.setupPinBoxes('pin-boxes', (code) => { completedWith = code; });
 
-  boxes[0].value = '1'; boxes[0].fire('input');
-  ok(boxes[1].focused === true, 'typing a digit advances focus to the next box');
+  ok(group.hidden.focused === true, 'the real input is focused as soon as the widget is set up');
 
-  boxes[1].value = ''; // simulate having nothing there, then backspacing
-  boxes[1].fire('keydown', { key: 'Backspace' });
-  ok(boxes[0].focused === true, 'backspace on an empty box steps focus back');
+  typeCode('pin-boxes', '1122');
+  ok(group.boxes[0].textContent === '1' && group.boxes[3].textContent === '2',
+    'each display box mirrors the matching digit as it\'s typed');
+  ok(completedWith === null, 'onComplete does not fire before all 6 digits are in');
 
-  pinTest.clear();
-  completedWith = null;
-  typeCode('pin-boxes', '112233');
+  typeCode('pin-boxes', '33');
   ok(completedWith === '112233', 'onComplete fires with the full 6-digit code once every box is filled: got ' + completedWith);
 
   pinTest.clear();
-  ok(boxes.every((b) => b.value === ''), 'clear() empties every box');
+  ok(group.hidden.value === '' && group.boxes.every((b) => b.textContent === ''),
+    'clear() empties the input and every display box');
+  ok(group.hidden.focused === true, 'clear() refocuses the input');
 
-  // Paste support: pasting a full code should distribute across all boxes
-  // and fire completion too.
+  // Paste support needs no special handling at all now — a paste into the
+  // one real field just fires 'input' with the full value already there,
+  // the same as typing it out digit by digit.
   completedWith = null;
-  boxes[0].fire('paste', {
-    preventDefault() {},
-    clipboardData: { getData: () => '998877' },
-  });
-  ok(completedWith === '998877', 'pasting a 6-digit code fills every box and completes: got ' + completedWith);
+  group.hidden.value = '998877';
+  group.hidden.fire('input');
+  ok(completedWith === '998877', 'pasting a 6-digit code (native paste → input) completes: got ' + completedWith);
+
+  // Non-digit characters (a stray letter from a fumbled paste, an IME
+  // artifact) are stripped rather than breaking the count.
+  pinTest.clear();
+  completedWith = null;
+  group.hidden.value = '11a223b3';
+  group.hidden.fire('input');
+  ok(completedWith === '112233', 'non-digit characters are stripped before completion is checked: got ' + completedWith);
 
   // ── registration browse / search ──
   await wait(10); // upload.js focuses reg-input on load, firing a browse-all search
