@@ -92,7 +92,7 @@ const searchReg = debounce(doSearchReg, 200);
 $('reg-input').addEventListener('input', () => {
   searchReg();
   const v = $('reg-input').value.trim();
-  if (v.length >= 2) loadVehicle(v); else hideForm();
+  if (v.length >= 2) checkReg(v); else hideForm();
 });
 $('reg-input').addEventListener('focus', () => {
   if (!$('reg-input').value.trim()) doSearchReg();
@@ -101,12 +101,55 @@ $('reg-input').addEventListener('focus', () => {
 function selectReg(reg) {
   $('reg-input').value = reg;
   $('reg-results').hidden = true;
+  // Picked straight from the list, so it's already a real registration —
+  // no need to ask whether to add it as a new one.
+  hideNewRegPrompt();
   loadVehicle(reg);
 }
+
+// A typed (not picked-from-the-list) registration is checked before the
+// form appears — the same protection NormalizeReg's confusable-character
+// fix exists for: a typo must never silently start editing a car that
+// already has a record under a slightly different spelling. Debounced the
+// same 200ms as search, so it only fires once someone's stopped typing.
+const checkReg = debounce(async (reg) => {
+  if (reg !== $('reg-input').value.trim()) return;
+  let exists;
+  try {
+    exists = (await api('/api/repairs/reg-exists?reg=' + encodeURIComponent(reg))).exists;
+  } catch (e) {
+    toast(e.message, true);
+    return;
+  }
+  if (reg !== $('reg-input').value.trim()) return;
+
+  if (exists) {
+    hideNewRegPrompt();
+    loadVehicle(reg);
+  } else {
+    $('form').hidden = true;
+    showNewRegPrompt(reg);
+  }
+}, 200);
+
+function showNewRegPrompt(reg) {
+  $('new-reg-text').textContent = `${reg.toUpperCase()} isn't on file yet.`;
+  $('new-reg-prompt').dataset.reg = reg;
+  $('new-reg-prompt').hidden = false;
+}
+function hideNewRegPrompt() {
+  $('new-reg-prompt').hidden = true;
+}
+$('new-reg-add').addEventListener('click', () => {
+  const reg = $('new-reg-prompt').dataset.reg;
+  hideNewRegPrompt();
+  loadVehicle(reg);
+});
 
 function hideForm() {
   currentReg = '';
   $('form').hidden = true;
+  hideNewRegPrompt();
 }
 
 const specFieldIds = {

@@ -24,6 +24,17 @@
 }
 .rp-results .r-empty { padding: 12px 16px; color: var(--g4); font-size: 14px; }
 
+/* "Add this as a new registration?" — shown instead of the form when a
+   typed plate matched nothing, so adding a genuinely new vehicle is a
+   deliberate click rather than something that just silently happens. */
+.rp-newreg {
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
+  padding: 14px 16px; border-radius: var(--radius-sm);
+  border: 1px dashed var(--g3); background: var(--g05);
+}
+.rp-newreg p { font-size: 14px; color: var(--g5); }
+.rp-newreg .btn { width: auto; }
+
 /* Previous-visits list — one card per visit, newest first. */
 .rp-history-list { display: flex; flex-direction: column; gap: 8px; }
 .rp-visit {

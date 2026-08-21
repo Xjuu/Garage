@@ -33,6 +33,15 @@
     <div class="rp-results" id="reg-results" hidden></div>
   </section>
 
+  <!-- Shown instead of the form when a typed registration matches nothing
+       on file — a typo must never silently start a second history for a
+       car that already has one, so adding a genuinely new vehicle is a
+       deliberate click, not an accident. -->
+  <div class="rp-newreg" id="new-reg-prompt" hidden>
+    <p id="new-reg-text"></p>
+    <button class="btn solid" type="button" id="new-reg-add">Add new registration</button>
+  </div>
+
   <section class="rp-history" id="history-section" hidden>
     <div class="section-title">Previous visits — <span class="reg" id="history-reg"></span></div>
     <div class="rp-history-list" id="history-list"></div>

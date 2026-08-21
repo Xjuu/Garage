@@ -34,6 +34,14 @@
     <div class="rp-results" id="reg-results" hidden></div>
   </section>
 
+  <!-- Shown instead of the form when a typed registration matches nothing
+       on file — a typo must never silently start editing the wrong car,
+       so adding a genuinely new vehicle here is a deliberate click. -->
+  <div class="rp-newreg" id="new-reg-prompt" hidden>
+    <p id="new-reg-text"></p>
+    <button class="btn solid" type="button" id="new-reg-add">Add new registration</button>
+  </div>
+
   <form class="rp-form" id="form" hidden>
     <div class="section-title">Update details — <span class="reg" id="form-reg"></span></div>
     <div class="rp-note">Whatever's left blank here is saved as blank — this replaces the record, it doesn't just add to it.</div>

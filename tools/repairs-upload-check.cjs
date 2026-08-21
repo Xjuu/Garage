@@ -75,6 +75,10 @@ async function fakeFetch(url, opts = {}) {
   if (url.startsWith('/api/repairs/search-vehicles')) {
     return { ok: true, status: 200, json: async () => ['AB12CDE'] };
   }
+  if (url.startsWith('/api/repairs/reg-exists')) {
+    const reg = decodeURIComponent(url.split('reg=')[1] || '');
+    return { ok: true, status: 200, json: async () => ({ exists: reg === 'AB12CDE' }) };
+  }
   if (url.startsWith('/api/repairs/upload/vehicle') && (!opts.method || opts.method === 'GET')) {
     return { ok: true, status: 200, json: async () => vehicleData };
   }
@@ -189,11 +193,28 @@ function typeCode(groupId, code) {
   ok(!!last && last.url.startsWith('/api/repairs/search-vehicles'),
     'page load browses vehicles via the initial focus: ' + (last && last.url));
 
-  // ── loading a vehicle prefills the form ──
+  // ── an unrecognized registration prompts before offering the form ──
+  fetchCalls.length = 0;
+  store['reg-input'].value = 'NEW99REG';
+  store['reg-input'].fire('input');
+  await wait(250); // checkReg is debounced 200ms, same as search
+  ok(store['form'].hidden === true, 'a registration matching nothing keeps the form hidden');
+  ok(store['new-reg-prompt'].hidden === false, 'and shows the "add as new?" prompt instead');
+  ok(store['new-reg-text'].textContent.includes('NEW99REG'), 'the prompt names the registration: ' + store['new-reg-text'].textContent);
+
+  // Clicking through actually reveals the (blank) form for that reg.
+  store['new-reg-add'].click();
+  await wait(10);
+  ok(store['new-reg-prompt'].hidden === true, 'clicking "Add new registration" dismisses the prompt');
+  ok(store['form'].hidden === false, 'and reveals the form to fill in');
+  ok(store['form-reg'].textContent === 'NEW99REG', 'for the registration that was typed: ' + store['form-reg'].textContent);
+
+  // ── loading a KNOWN vehicle skips the prompt and prefills the form ──
   fetchCalls.length = 0;
   store['reg-input'].value = 'AB12CDE';
   store['reg-input'].fire('input');
-  await wait(10);
+  await wait(250);
+  ok(store['new-reg-prompt'].hidden === true, 'a registration that does exist never shows the "add as new?" prompt');
   ok(store['form'].hidden === false, 'selecting a vehicle reveals the update form');
   ok(store['vin'].value === 'OLDVIN', 'VIN prefilled from the current registry record: got ' + store['vin'].value);
   ok(store['make'].value === 'Ford', 'Make prefilled: got ' + store['make'].value);

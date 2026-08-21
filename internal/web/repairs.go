@@ -29,6 +29,7 @@ func (s *Server) repairsRoutes(sub fs.FS) http.Handler {
 
 	device := http.NewServeMux()
 	device.HandleFunc("GET /api/repairs/search-vehicles", s.json(s.repairsSearchVehicles))
+	device.HandleFunc("GET /api/repairs/reg-exists", s.json(s.repairsRegExists))
 	device.HandleFunc("GET /api/repairs/history", s.json(s.repairsHistory))
 	device.HandleFunc("POST /api/repairs/log", s.json(s.repairsLogEntry))
 	// The read is no more sensitive than search/history above — reading a
@@ -43,6 +44,7 @@ func (s *Server) repairsRoutes(sub fs.FS) http.Handler {
 	device.HandleFunc("POST /api/repairs/upload/verify", s.json(s.repairsUploadVerify))
 	protected := s.requireRepairsDevice(device)
 	mux.Handle("/api/repairs/search-vehicles", protected)
+	mux.Handle("/api/repairs/reg-exists", protected)
 	mux.Handle("/api/repairs/history", protected)
 	mux.Handle("/api/repairs/log", protected)
 	mux.Handle("/api/repairs/upload/vehicle", protected)
@@ -192,6 +194,22 @@ func (s *Server) handleRepairsSession(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) repairsSearchVehicles(r *http.Request) (any, error) {
 	return s.db.SearchRepairVehicles(r.URL.Query().Get("q"), queryLimit(r, 20))
+}
+
+// repairsRegExists backs the "add this as a new registration?" prompt —
+// both the main log page and /upload check before treating a typed
+// registration that matched nothing as fair game, so a typo doesn't
+// silently start a second history for a car that already has one.
+func (s *Server) repairsRegExists(r *http.Request) (any, error) {
+	reg := r.URL.Query().Get("reg")
+	if reg == "" {
+		return nil, fail(http.StatusBadRequest, "reg is required")
+	}
+	exists, err := s.db.RegExists(reg)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]bool{"exists": exists}, nil
 }
 
 // repairsHistory is what a typed-in registration surfaces: everything

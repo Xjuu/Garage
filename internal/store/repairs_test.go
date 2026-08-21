@@ -386,3 +386,64 @@ func TestRepairsUploadNeedsVerifyAfterTheTimeWindow(t *testing.T) {
 		t.Fatalf("after the 25-minute window, needs=%v err=%v, want re-verification required", needs, err)
 	}
 }
+
+// ── reg existence (the "add as a new registration?" gate) ───────────────
+
+func TestRegExistsIsFalseForATrulyUnknownPlate(t *testing.T) {
+	db := open(t)
+	exists, err := db.RegExists("ZZ99ZZZ")
+	if err != nil || exists {
+		t.Fatalf("a plate nobody has ever seen: exists=%v err=%v", exists, err)
+	}
+}
+
+func TestRegExistsIsTrueOnceInTheRegistry(t *testing.T) {
+	db := open(t)
+	db.SaveVehicle("AB12CDE", VehiclePatch{})
+	exists, err := db.RegExists("AB12CDE")
+	if err != nil || !exists {
+		t.Fatalf("a registered vehicle: exists=%v err=%v", exists, err)
+	}
+}
+
+func TestRegExistsIsTrueFromInvoiceHistoryAlone(t *testing.T) {
+	db := open(t)
+	add(t, db, Invoice{InvoiceNumber: "INV-1", VehicleReg: "AB12CDE", InvoiceDate: "2026-08-01"})
+	exists, err := db.RegExists("AB12CDE")
+	if err != nil || !exists {
+		t.Fatalf("a vehicle known only from an invoice, never registered: exists=%v err=%v", exists, err)
+	}
+}
+
+func TestRegExistsIsTrueFromRepairHistoryAlone(t *testing.T) {
+	db := open(t)
+	if _, err := db.LogRepair(Repair{VehicleReg: "AB12CDE", ServiceType: "full"}, "d1"); err != nil {
+		t.Fatalf("LogRepair: %v", err)
+	}
+	exists, err := db.RegExists("AB12CDE")
+	if err != nil || !exists {
+		t.Fatalf("a vehicle with a logged repair (LogRepair also registers it, but check the repairs table itself matters too): exists=%v err=%v", exists, err)
+	}
+}
+
+func TestRegExistsIgnoresConfusableFormatting(t *testing.T) {
+	db := open(t)
+	db.SaveVehicle("AB12CDE", VehiclePatch{})
+	// Lower case, spaced, hyphenated — NormalizeReg's job, exercised here
+	// through RegExists so the "add as new?" gate doesn't fire over
+	// formatting alone.
+	exists, err := db.RegExists("ab12 cde")
+	if err != nil || !exists {
+		t.Fatalf("differently formatted but the same plate: exists=%v err=%v", exists, err)
+	}
+}
+
+func TestRegExistsRejectsAnEmptyOrPlaceholderRegistration(t *testing.T) {
+	db := open(t)
+	if exists, err := db.RegExists(""); err != nil || exists {
+		t.Fatalf("empty string: exists=%v err=%v", exists, err)
+	}
+	if exists, err := db.RegExists("-"); err != nil || exists {
+		t.Fatalf("a placeholder with no digits: exists=%v err=%v", exists, err)
+	}
+}

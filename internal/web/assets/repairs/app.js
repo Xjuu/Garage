@@ -104,7 +104,7 @@ const searchReg = debounce(doSearchReg, 200);
 $('reg-input').addEventListener('input', () => {
   searchReg();
   const v = $('reg-input').value.trim();
-  if (v.length >= 2) loadHistory(v); else hideHistoryAndForm();
+  if (v.length >= 2) checkReg(v); else hideHistoryAndForm();
 });
 $('reg-input').addEventListener('focus', () => {
   if (!$('reg-input').value.trim()) doSearchReg();
@@ -113,14 +113,60 @@ $('reg-input').addEventListener('focus', () => {
 function selectReg(reg) {
   $('reg-input').value = reg;
   $('reg-results').hidden = true;
+  // Picked straight from the list, so it's already a real registration —
+  // no need to ask whether to add it as a new one.
+  hideNewRegPrompt();
   loadHistory(reg);
 }
+
+// A typed (not picked-from-the-list) registration is checked against the
+// registry, invoices and the repairs log before the form appears — the
+// same protection NormalizeReg's confusable-character fix exists for: a
+// typo must never silently open a second history for a car that already
+// has one. Debounced the same 200ms as search, so it only fires once
+// someone's actually stopped typing.
+const checkReg = debounce(async (reg) => {
+  if (reg !== $('reg-input').value.trim()) return; // superseded by a later keystroke
+  let exists;
+  try {
+    exists = (await api('/api/repairs/reg-exists?reg=' + encodeURIComponent(reg))).exists;
+  } catch (e) {
+    toast(e.message, true);
+    return;
+  }
+  if (reg !== $('reg-input').value.trim()) return; // superseded while the request was in flight
+
+  if (exists) {
+    hideNewRegPrompt();
+    loadHistory(reg);
+  } else {
+    $('history-section').hidden = true;
+    $('form').hidden = true;
+    prefillSpec(null);
+    showNewRegPrompt(reg);
+  }
+}, 200);
+
+function showNewRegPrompt(reg) {
+  $('new-reg-text').textContent = `${reg.toUpperCase()} isn't on file yet.`;
+  $('new-reg-prompt').dataset.reg = reg;
+  $('new-reg-prompt').hidden = false;
+}
+function hideNewRegPrompt() {
+  $('new-reg-prompt').hidden = true;
+}
+$('new-reg-add').addEventListener('click', () => {
+  const reg = $('new-reg-prompt').dataset.reg;
+  hideNewRegPrompt();
+  loadHistory(reg);
+});
 
 function hideHistoryAndForm() {
   currentReg = '';
   $('history-section').hidden = true;
   $('form').hidden = true;
   prefillSpec(null);
+  hideNewRegPrompt();
 }
 
 async function loadHistory(reg) {

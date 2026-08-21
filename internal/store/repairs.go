@@ -225,6 +225,30 @@ func (s *Store) SearchRepairVehicles(q string, limit int) ([]string, error) {
 	return out, rows.Err()
 }
 
+// RegExists reports whether a registration is known to the system at all —
+// in the vehicle registry, on an invoice, or already in the repairs log —
+// so repairs.<domain> can ask "add this as a new registration?" before
+// treating an unrecognized plate as fair game. The same protection
+// NormalizeReg's confusable-character fix exists for: a typo must never
+// silently open a second history for a car that already has one, and a
+// genuinely new vehicle should be added on purpose, not by accident.
+func (s *Store) RegExists(reg string) (bool, error) {
+	reg = NormalizeReg(reg)
+	if reg == "" {
+		return false, nil
+	}
+	var n int
+	err := s.db.QueryRow(`
+		SELECT (SELECT COUNT(1) FROM vehicles WHERE registration = ?)
+		     + (SELECT COUNT(1) FROM invoices WHERE vehicle_reg = ?)
+		     + (SELECT COUNT(1) FROM repairs WHERE vehicle_reg = ?)`,
+		reg, reg, reg).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // ── vehicle spec ─────────────────────────────────────────────────────────
 
 // VehicleSpecPatch updates only the fields actually given — unlike
