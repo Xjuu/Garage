@@ -35,7 +35,7 @@ function el(id) {
   // rather than by the ordering actually being right.
   const classes = new Set();
   return {
-    id, textContent: '', innerHTML: '', value: '', hidden: hiddenIds.has(id),
+    id, tagName: '', textContent: '', innerHTML: '', value: '', hidden: hiddenIds.has(id),
     dataset: {}, style: {},
     classList: {
       add: (c) => classes.add(c),
@@ -47,7 +47,14 @@ function el(id) {
     click() { clicks.push(id); (listeners.click || []).forEach((fn) => fn({})); },
     setAttribute() {}, removeAttribute() {},
     appendChild() {}, removeChild() {}, remove() {}, insertAdjacentHTML() {},
-    scrollIntoView() {}, focus() {}, blur() {},
+    scrollIntoView() {}, focus() {},
+    // A real <select>/<input> that blurs itself hands focus back to the
+    // page, which is exactly what the shortcut guard below watches
+    // document.activeElement for — so this needs to actually clear it
+    // rather than being a no-op, or test 12's regression coverage for the
+    // "changing a filter dropdown leaves shortcuts dead" bug would pass
+    // whether or not app.js's own e.target.blur() call is still there.
+    blur() { if (activeElement === this) activeElement = { tagName: 'BODY', isContentEditable: false }; },
     querySelectorAll: () => [], querySelector: () => null, closest: () => null,
     isConnected: true, clientWidth: 1200,
   };
@@ -118,6 +125,14 @@ function press(key, opts = {}) {
   const e = { key, metaKey: false, ctrlKey: false, altKey: false, ...opts, preventDefault() {} };
   (docCapture.keydown || []).forEach((fn) => fn(e));
   (docBubble.keydown || []).forEach((fn) => fn(e));
+}
+
+// Mirrors a real <select>'s 'change' bubbling up to document — the event
+// the blur-on-change fix listens for.
+function fireChange(target) {
+  const e = { target, preventDefault() {} };
+  (docCapture.change || []).forEach((fn) => fn(e));
+  (docBubble.change || []).forEach((fn) => fn(e));
 }
 
 let failed = 0;
@@ -278,6 +293,27 @@ clicks.length = 0; shown.length = 0;
 press('s');
 check('on Overview, "s" clicks Sync again (no shadowing outside Analysis)',
   clicks.includes('btn-sync') && shown.length === 0);
+
+// 12. A <select> keeps keyboard focus after the user picks a value — same
+//     as a real browser — which used to leave every shortcut silently dead
+//     until the user happened to click somewhere else. Focus a filter
+//     dropdown stand-in, confirm shortcuts are (correctly) still suppressed
+//     right up until it changes, then fire the 'change' its own picker
+//     would dispatch and confirm the page hands focus back immediately —
+//     see app.js's own comment on the fix this covers.
+store['f-supplier'].tagName = 'SELECT';
+activeElement = store['f-supplier'];
+clicks.length = 0;
+press('s');
+check('a shortcut is still suppressed the instant before a focused select changes', clicks.length === 0);
+
+fireChange(store['f-supplier']);
+check('changing a <select> hands focus back to the page', activeElement.tagName === 'BODY');
+
+clicks.length = 0;
+press('s');
+check('a shortcut works again right after the select changes, with no click in between',
+  clicks.includes('btn-sync'));
 
 if (failed) {
   console.log(`\n${failed} check(s) failed.`);

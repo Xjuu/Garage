@@ -657,6 +657,17 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// A <select> keeps keyboard focus after the user picks a value — that's
+// just how the browser works, not a bug on its own — but the guard above
+// treats a focused SELECT the same as a focused text input and stays
+// silent, so every shortcut key would otherwise stop working the moment
+// someone touched a filter dropdown, until they happened to click
+// somewhere else. Nothing left to type into a select once it's changed, so
+// hand focus back to the page immediately and let shortcuts resume.
+document.addEventListener('change', (e) => {
+  if (e.target.tagName === 'SELECT') e.target.blur();
+});
+
 $('d-save').addEventListener('click', async () => {
   if (!state.current) return;
   const patch = {};
