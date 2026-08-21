@@ -72,8 +72,16 @@ func staticHandler(files fs.FS) http.Handler {
 	})
 }
 
-// assetRef matches the stylesheet and script URLs in the served HTML.
-var assetRef = regexp.MustCompile(`/static/([A-Za-z0-9._-]+\.(?:css|js))`)
+// assetRef matches the stylesheet and script URLs in the served HTML —
+// including ones in a subdirectory like /static/repairs/pinbox.js: the
+// character class used to exclude '/', which silently meant every asset
+// under a subdirectory was served unversioned and never cache-busted no
+// matter how many times its content changed on deploy. Every repairs.
+// <domain> script and stylesheet lived under /static/repairs/ and was
+// affected — a browser that ever cached one kept serving that exact copy
+// for up to 4 hours (see staticHandler's max-age) after every single
+// deploy, regardless of what actually shipped.
+var assetRef = regexp.MustCompile(`/static/([A-Za-z0-9._/-]+\.(?:css|js))`)
 
 // versionAssets rewrites /static/app.css into /static/app.css?v=<hash>.
 //

@@ -46,6 +46,23 @@ func TestVersionAssetsDoesNotCorruptThePage(t *testing.T) {
 	}
 }
 
+// The regression this test exists for: assetRef's character class used to
+// exclude '/', so any asset in a subdirectory — every script and
+// stylesheet under /static/repairs/ — was silently served unversioned and
+// never cache-busted, no matter how many times its content changed on
+// deploy. A browser that ever cached one kept serving that exact copy for
+// hours after every subsequent deploy.
+func TestVersionAssetsHandlesAssetsInASubdirectory(t *testing.T) {
+	page := []byte(`<script src="/static/repairs/pinbox.js"></script>` +
+		`<script src="/static/repairs/pin.js"></script>`)
+	got := string(versionAssets(page))
+
+	re := regexp.MustCompile(`/static/repairs/pinbox\.js\?v=[a-f0-9]+`)
+	if !re.MatchString(got) {
+		t.Fatalf("an asset in a subdirectory was not versioned at all:\n%s", got)
+	}
+}
+
 // An asset that does not exist must be left alone rather than breaking the tag.
 func TestVersionAssetsLeavesUnknownFilesIntact(t *testing.T) {
 	page := []byte(`<script src="/static/does-not-exist.js"></script>`)
