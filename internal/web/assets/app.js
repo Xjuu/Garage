@@ -259,13 +259,9 @@ async function loadOverview() {
     { k: 'Vehicles', v: int(o.vehicles) },
     { k: 'Line items', v: int(o.items) },
   ];
-  if (o.credit_count > 0) {
-    tiles.push({
-      k: 'Credit notes', v: '−£' + money(Math.abs(o.credits)),
-      m: `${int(o.credit_count)} note(s)`,
-    });
-    tiles.push({ k: 'Net of credits', v: '£' + money(o.brutto), m: 'purchases less credits' });
-  }
+  // Credit notes are already visible where they matter — a returned
+  // invoice greys out in the Invoices list — without a second, separate
+  // "credit notes" concept surfaced on Overview too.
   if (o.needs_review > 0) {
     tiles.push({ k: 'Needs review', v: int(o.needs_review), m: 'figures did not reconcile', alert: true });
   }
@@ -314,22 +310,26 @@ async function loadInvoices() {
 
   $('inv-rows').innerHTML = data.invoices.length
     ? data.invoices.map((inv) => {
+        // A credit note IS the return, not a separate thing from one — the
+        // list treats both the same at a glance (grey, "Returned"); which
+        // one you're actually looking at only matters once you click in
+        // (see the "credited" wording in the drawer).
+        const isReturn = inv.Returned || !!inv.CreditOf;
         const parts = (inv.Items || [])
           .map((i) => i.PartNumber).filter(Boolean);
         const shown = parts.slice(0, 2).map((p) => `<span class="part">${esc(p)}</span>`).join(' ');
         const more = parts.length > 2 ? ` <span class="muted">+${parts.length - 2}</span>` : '';
         // A returned invoice's parts aren't what's actually here any more —
         // naming them in the row reads as current stock, which they're not.
-        const partsCell = inv.Returned
+        const partsCell = isReturn
           ? '<span class="muted">Returned</span>'
           : (shown || '<span class="muted">—</span>') + more;
         const status = [
           inv.NeedsReview ? '<span class="pill flag">Check</span>' : '',
-          inv.Returned ? '<span class="pill">Returned</span>' : '',
-          inv.CreditOf ? '<span class="pill">Credit</span>' : '',
+          isReturn ? '<span class="pill">Returned</span>' : '',
         ].filter(Boolean).join(' ');
         return `
-        <tr class="clickable${inv.NeedsReview ? ' flagged' : ''}${inv.Returned ? ' returned' : ''}" data-id="${inv.ID}">
+        <tr class="clickable${inv.NeedsReview ? ' flagged' : ''}${isReturn ? ' returned' : ''}" data-id="${inv.ID}">
           <td class="mono">${dash(inv.InvoiceDate)}</td>
           <td class="truncate" title="${esc(inv.Supplier)}">${dash(inv.Supplier)}</td>
           <td class="mono">${dash(inv.InvoiceNumber)}</td>
@@ -473,7 +473,7 @@ async function openInvoice(id) {
     $('d-body').innerHTML = `
       ${inv.NeedsReview && inv.Notes ? `<div class="note"><strong>Needs review.</strong> ${esc(inv.Notes)}</div>` : ''}
       ${inv.Returned ? '<div class="note"><strong>Returned.</strong> A credit note has been linked against this invoice — its amount is already netted off by that credit note\'s own total, this is a label only.</div>' : ''}
-      ${inv.CreditOf ? `<div class="note"><strong>Credit note.</strong> Linked to <a href="#" data-open-invoice="${inv.CreditOf}">invoice #${inv.CreditOf}</a>, which is marked returned.</div>` : ''}
+      ${inv.CreditOf ? `<div class="note"><strong>Credited.</strong> This is the credit note for <a href="#" data-open-invoice="${inv.CreditOf}">invoice #${inv.CreditOf}</a>, which it marks returned.</div>` : ''}
 
       <div class="grid2">
         ${field('Supplier', 'supplier', inv.Supplier)}

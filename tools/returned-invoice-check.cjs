@@ -42,13 +42,26 @@ ids.forEach((i) => { store[i] = el(i); });
   .forEach((i) => { store[i] ??= el(i); });
 
 // A very random test amount, same shape a real "create a fake invoice,
-// then credit it" QA pass produces — a returned original alongside an
-// ordinary invoice that must render completely normally.
+// then credit it" QA pass produces — a returned original, its own credit
+// note (which must read exactly the same as the original in this list —
+// a credit note IS the return, not a separate thing from one), and an
+// ordinary invoice that must render completely normally. The credit note
+// carries two line items on purpose: the Parts-column replacement has to
+// hold regardless of how many items an invoice has, not just one.
 const RETURNED = {
   ID: 1, InvoiceDate: '2026-08-20', Supplier: 'QA Test Supplier Ltd', InvoiceNumber: 'QATEST-0001',
   VehicleReg: 'QA12TST', Netto: 1581.43, VATAmount: 316.29, Brutto: 1897.71,
   Returned: true, CreditOf: null, NeedsReview: false,
   Items: [{ PartNumber: 'QA-PART-99', Desc: 'Random test part' }],
+};
+const CREDIT_NOTE = {
+  ID: 3, InvoiceDate: '2026-08-21', Supplier: 'QA Test Supplier Ltd', InvoiceNumber: 'QATEST-0001-CN',
+  VehicleReg: 'QA12TST', Netto: -1581.43, VATAmount: -316.29, Brutto: -1897.71,
+  Returned: false, CreditOf: 1, NeedsReview: false,
+  Items: [
+    { PartNumber: 'QA-PART-99', Desc: 'Random test part (returned)' },
+    { PartNumber: 'QA-PART-100', Desc: 'A second returned part' },
+  ],
 };
 const ORDINARY = {
   ID: 2, InvoiceDate: '2026-08-19', Supplier: 'Millfield Autoparts Ltd', InvoiceNumber: 'HS351559',
@@ -73,7 +86,7 @@ const ctx = vm.createContext({
     if (url.startsWith('/api/invoices')) {
       return {
         ok: true, status: 200,
-        json: async () => ({ invoices: [RETURNED, ORDINARY], total: 2, netto: 0, vat: 0, brutto: 0 }),
+        json: async () => ({ invoices: [RETURNED, CREDIT_NOTE, ORDINARY], total: 3, netto: 0, vat: 0, brutto: 0 }),
       };
     }
     return { ok: true, status: 200, json: async () => ({}) };
@@ -113,11 +126,22 @@ function ok(cond, label) {
   };
 
   const returnedRow = rowFor(RETURNED.ID);
-  ok(returnedRow.includes('returned'), 'the returned invoice\'s row carries the "returned" class');
+  ok(returnedRow.includes('returned'), 'the returned original\'s row carries the "returned" class');
   ok(returnedRow.includes('Returned') && !returnedRow.includes('QA-PART-99'),
     'its Parts column says "Returned" instead of listing the (credited) part number');
   ok(!returnedRow.includes('flagged'),
     'a returned invoice does not also get the red "needs review" edge — it is settled, not a problem');
+
+  // A credit note IS the return, not a separate concept — its row on this
+  // list has to read exactly the same as the original's: grey, "Returned",
+  // no "Credit" pill of its own, and no part numbers listed even though
+  // this specific credit note carries two line items.
+  const creditRow = rowFor(CREDIT_NOTE.ID);
+  ok(creditRow.includes('returned'), 'the credit note\'s own row ALSO carries the "returned" class');
+  ok(creditRow.includes('Returned'), 'and shows the "Returned" pill, same as the original');
+  ok(!creditRow.includes('Credit</span>'), 'and does NOT show a separate "Credit" pill any more');
+  ok(!creditRow.includes('QA-PART-99') && !creditRow.includes('QA-PART-100'),
+    'neither of its two part numbers leaks into the Parts column');
 
   const ordinaryRow = rowFor(ORDINARY.ID);
   ok(!/class="clickable[^"]*returned/.test(ordinaryRow), 'an ordinary invoice\'s row does NOT carry the "returned" class');
