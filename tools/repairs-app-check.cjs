@@ -103,6 +103,11 @@ const ctx = vm.createContext({
     querySelector: () => null,
     createElement: () => makeEl('tmp'),
     cookie: 'goldstar_repairs_csrf=test-csrf-token',
+    // Real behaviour isn't exercised here (see repairs-idle-logout-check.cjs
+    // for that) — this just has to exist so app.js's own top-level
+    // document.addEventListener calls (the idle-signout listeners) don't
+    // throw while loading.
+    addEventListener() {},
   },
   location: { href: '' },
   setTimeout, clearTimeout,

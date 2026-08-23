@@ -294,6 +294,11 @@ tbody tr.flagged td:first-child { box-shadow: inset 3px 0 0 var(--flag); }
 /* Same left-edge marker as .flagged, in ink rather than the reserved
    alert red — this flags a row as notable, not as a problem. */
 tbody tr.notable td:first-child { box-shadow: inset 3px 0 0 var(--ink); }
+/* A returned invoice is already netted off by its credit note — greyed
+   out reads as "settled, not part of today's total" rather than a
+   problem needing attention, the way .flagged's red edge would suggest. */
+tbody tr.returned td { color: var(--g4); }
+tbody tr.returned .reg, tbody tr.returned .part { border-color: var(--g2); }
 
 td.num, th.num {
   text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;

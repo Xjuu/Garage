@@ -56,10 +56,31 @@ function whenLocalShort(iso) {
   return isNaN(d) ? esc(iso) : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-$('btn-signout').addEventListener('click', async () => {
+async function signOut() {
   await api('/api/repairs/logout', { method: 'POST' }).catch(() => {});
   location.href = '/';
-});
+}
+
+$('btn-signout').addEventListener('click', signOut);
+
+// ── auto sign-out after inactivity ──────────────────────────────────────
+// A shared shop device left signed in is a standing way in for whoever
+// walks up to it next once the crew has moved on — 15 minutes with nobody
+// touching the screen signs this device out, same as pressing Sign out by
+// hand. The device itself stays remembered (see repairsauth's own
+// long-lived cookie), so the next real use is still just the PIN, not
+// starting over from scratch.
+const IDLE_LIMIT_MS = 15 * 60 * 1000;
+let idleTimer = null;
+
+function scheduleIdleSignOut() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(signOut, IDLE_LIMIT_MS);
+}
+
+['mousedown', 'keydown', 'touchstart', 'mousemove'].forEach((ev) =>
+  document.addEventListener(ev, scheduleIdleSignOut));
+scheduleIdleSignOut();
 
 // ── state ─────────────────────────────────────────────────────────────────
 

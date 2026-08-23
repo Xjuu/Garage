@@ -318,18 +318,23 @@ async function loadInvoices() {
           .map((i) => i.PartNumber).filter(Boolean);
         const shown = parts.slice(0, 2).map((p) => `<span class="part">${esc(p)}</span>`).join(' ');
         const more = parts.length > 2 ? ` <span class="muted">+${parts.length - 2}</span>` : '';
+        // A returned invoice's parts aren't what's actually here any more —
+        // naming them in the row reads as current stock, which they're not.
+        const partsCell = inv.Returned
+          ? '<span class="muted">Returned</span>'
+          : (shown || '<span class="muted">—</span>') + more;
         const status = [
           inv.NeedsReview ? '<span class="pill flag">Check</span>' : '',
           inv.Returned ? '<span class="pill">Returned</span>' : '',
           inv.CreditOf ? '<span class="pill">Credit</span>' : '',
         ].filter(Boolean).join(' ');
         return `
-        <tr class="clickable${inv.NeedsReview ? ' flagged' : ''}" data-id="${inv.ID}">
+        <tr class="clickable${inv.NeedsReview ? ' flagged' : ''}${inv.Returned ? ' returned' : ''}" data-id="${inv.ID}">
           <td class="mono">${dash(inv.InvoiceDate)}</td>
           <td class="truncate" title="${esc(inv.Supplier)}">${dash(inv.Supplier)}</td>
           <td class="mono">${dash(inv.InvoiceNumber)}</td>
           <td>${inv.VehicleReg ? `<span class="reg">${esc(inv.VehicleReg)}</span>` : '<span class="muted">—</span>'}</td>
-          <td>${shown || '<span class="muted">—</span>'}${more}</td>
+          <td>${partsCell}</td>
           <td class="num">${money(inv.Netto)}</td>
           <td class="num">${money(inv.VATAmount)}</td>
           <td class="num strong">${money(inv.Brutto)}</td>
