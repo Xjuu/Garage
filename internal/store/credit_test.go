@@ -101,6 +101,87 @@ func TestMarkReturnedSetsTheFlag(t *testing.T) {
 	}
 }
 
+// Deleting a credit note leaves behind exactly the state that made its
+// original "returned" in the first place — nothing crediting it any more,
+// but still flagged as if there were. Delete has to clear that flag itself
+// rather than leave the original stuck permanently "returned" with its
+// full amount silently back in every total.
+func TestDeletingTheOnlyCreditNoteClearsReturnedOnTheOriginal(t *testing.T) {
+	db := open(t)
+	origID := add(t, db, Invoice{Supplier: "ACME Parts", InvoiceNumber: "INV-100", Brutto: 120})
+	creditID := add(t, db, Invoice{Supplier: "ACME Parts", InvoiceNumber: "INV-100-CN",
+		Brutto: -120, CreditOf: &origID})
+	if err := db.MarkReturned(origID); err != nil {
+		t.Fatalf("MarkReturned: %v", err)
+	}
+
+	if _, err := db.Delete(creditID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	after, err := db.Get(origID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if after.Returned {
+		t.Fatalf("the original is still marked returned after its only credit note was deleted")
+	}
+}
+
+// A second, still-live credit note against the same original is reason
+// enough to leave it marked — deleting one of two must not silently un-flag
+// an invoice that's still actually credited by the other.
+func TestDeletingOneOfTwoCreditNotesLeavesReturnedSetIfAnotherRemains(t *testing.T) {
+	db := open(t)
+	origID := add(t, db, Invoice{Supplier: "ACME Parts", InvoiceNumber: "INV-100", Brutto: 120})
+	credit1 := add(t, db, Invoice{Supplier: "ACME Parts", InvoiceNumber: "INV-100-CN1",
+		Brutto: -60, CreditOf: &origID})
+	_ = add(t, db, Invoice{Supplier: "ACME Parts", InvoiceNumber: "INV-100-CN2",
+		Brutto: -60, CreditOf: &origID})
+	if err := db.MarkReturned(origID); err != nil {
+		t.Fatalf("MarkReturned: %v", err)
+	}
+
+	if _, err := db.Delete(credit1); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	after, err := db.Get(origID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !after.Returned {
+		t.Fatalf("the original was un-marked returned even though a second credit note still credits it")
+	}
+}
+
+// Deleting an ordinary invoice that is neither a credit note nor anyone
+// else's original must not touch any OTHER invoice's returned flag at all
+// — the credit_of IS NULL guard has to actually work, not just happen to
+// pass because there was nothing to break yet.
+func TestDeletingAnOrdinaryInvoiceTouchesNoOtherInvoicesReturnedFlag(t *testing.T) {
+	db := open(t)
+	origID := add(t, db, Invoice{Supplier: "ACME Parts", InvoiceNumber: "INV-100", Brutto: 120})
+	add(t, db, Invoice{Supplier: "ACME Parts", InvoiceNumber: "INV-100-CN",
+		Brutto: -120, CreditOf: &origID})
+	if err := db.MarkReturned(origID); err != nil {
+		t.Fatalf("MarkReturned: %v", err)
+	}
+	unrelatedID := add(t, db, Invoice{Supplier: "Someone Else Ltd", InvoiceNumber: "OTHER-1", Brutto: 50})
+
+	if _, err := db.Delete(unrelatedID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	after, err := db.Get(origID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !after.Returned {
+		t.Fatalf("deleting an unrelated invoice must not clear returned on this one")
+	}
+}
+
 // CreditOf is a nullable link stored on the credit note's own row — this
 // pins down that it survives the round trip through both Get (single) and
 // Search (list) instead of silently coming back nil.

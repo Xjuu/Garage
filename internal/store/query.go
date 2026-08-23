@@ -289,13 +289,37 @@ func (s *Store) Update(id int64, p Patch) error {
 // Delete removes an invoice and its items. The archived PDF is left on disk
 // deliberately: the document is the legal record, the row is only our reading
 // of it, and re-ingesting the file is how you recover from a bad extraction.
+//
+// Deleting a credit note leaves behind exactly the state that made its
+// original invoice "returned" in the first place — that flag has to go with
+// it, or the original sits marked returned forever with nothing crediting
+// it any more, fully counted again in every total while still reading as
+// settled in the UI. Cleared only when this was truly the last credit note
+// against that original: a second, still-live credit note is reason enough
+// to leave it marked.
 func (s *Store) Delete(id int64) (sourceFile string, err error) {
-	if err := s.db.QueryRow(`SELECT source_file FROM invoices WHERE id = ?`, id).Scan(&sourceFile); err != nil {
+	var creditOf sql.NullInt64
+	if err := s.db.QueryRow(`SELECT source_file, credit_of FROM invoices WHERE id = ?`, id).
+		Scan(&sourceFile, &creditOf); err != nil {
 		return "", err
 	}
 	// Clearing the hash record too would let the same file be re-ingested.
-	_, err = s.db.Exec(`DELETE FROM invoices WHERE id = ?`, id)
-	return sourceFile, err
+	if _, err := s.db.Exec(`DELETE FROM invoices WHERE id = ?`, id); err != nil {
+		return "", err
+	}
+	if creditOf.Valid {
+		var remaining int
+		if err := s.db.QueryRow(`SELECT COUNT(1) FROM invoices WHERE credit_of = ?`, creditOf.Int64).
+			Scan(&remaining); err != nil {
+			return sourceFile, err
+		}
+		if remaining == 0 {
+			if _, err := s.db.Exec(`UPDATE invoices SET returned = 0 WHERE id = ?`, creditOf.Int64); err != nil {
+				return sourceFile, err
+			}
+		}
+	}
+	return sourceFile, nil
 }
 
 // ── Aggregates ────────────────────────────────────────────────────────────
