@@ -96,7 +96,7 @@ func TestInsertInvoiceWithNoVehicleRegRegistersNothing(t *testing.T) {
 // the way a server restart would.
 func TestReopenBackfillsOrphanVehiclesFromExistingInvoices(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "test.db")
-	db, err := Open(path)
+	db, err := Open(path, "")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestReopenBackfillsOrphanVehiclesFromExistingInvoices(t *testing.T) {
 
 	db.Close()
 
-	reopened, err := Open(path)
+	reopened, err := Open(path, "")
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

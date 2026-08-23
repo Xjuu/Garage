@@ -10,9 +10,14 @@ CONF_DIR="$BIN_DIR"   # settings live beside the binary
 
 echo "==> Building"
 cd "$REPO_DIR"
-# CGO_ENABLED=0 keeps the binary static: the SQLite driver is pure Go, so the
-# result runs on any glibc or musl system without matching library versions.
-CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o goldstar .
+# internal/store uses SQLCipher (github.com/mutecomm/go-sqlcipher/v4) to
+# encrypt the database at rest, which needs cgo and a C compiler — a change
+# from the previous pure-Go SQLite driver, which needed neither. The result
+# still has no runtime library dependency beyond libc (SQLCipher here is
+# built with its own bundled crypto, not system OpenSSL), so it still runs
+# anywhere without matching library versions; it just needs gcc (or clang)
+# present on THIS machine to build.
+CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o goldstar .
 
 echo "==> Installing binary to $BIN_DIR"
 mkdir -p "$BIN_DIR"
@@ -54,6 +59,27 @@ if ! grep -q '^GOLDSTAR_PASSWORD_HASH=.\+' "$CONF_DIR/.env" 2>/dev/null; then
       echo "    password set"
     else
       echo "    skipped — run \`goldstar passwd\` later"
+    fi
+  fi
+fi
+
+# The database will not open without an encryption key either, same shape
+# as the password above.
+if ! grep -q '^GOLDSTAR_DB_KEY=.\+' "$CONF_DIR/.env" 2>/dev/null; then
+  echo
+  echo "==> The database needs an encryption key before it will start."
+  read -r -p "    Set one now? [Y/n] " reply
+  if [[ ! "$reply" =~ ^[Nn] ]]; then
+    if key_line=$("$BIN_DIR/goldstar" db-key-gen); then
+      if grep -q '^GOLDSTAR_DB_KEY=' "$CONF_DIR/.env"; then
+        sed -i "s|^GOLDSTAR_DB_KEY=.*|$key_line|" "$CONF_DIR/.env"
+      else
+        printf '%s\n' "$key_line" >> "$CONF_DIR/.env"
+      fi
+      echo "    key set — keep a copy of $CONF_DIR/.env somewhere else too;"
+      echo "    the database is permanently unreadable without this key, backups included."
+    else
+      echo "    skipped — run \`goldstar db-key-gen\` later"
     fi
   fi
 fi

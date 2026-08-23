@@ -29,7 +29,11 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "==> Building for linux/$ARCH"
 cd "$HERE"
-CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" \
+# internal/store uses SQLCipher (github.com/mutecomm/go-sqlcipher/v4) to
+# encrypt the database at rest, which needs cgo — CGO_ENABLED=1 is only a
+# native build here, not a real cross-compile, as long as this script runs
+# on a linux/$ARCH machine itself.
+CGO_ENABLED=1 GOOS=linux GOARCH="$ARCH" \
   go build -trimpath -ldflags="-s -w" -o /tmp/goldstar-deploy .
 
 echo "==> Preparing the server"
@@ -142,8 +146,8 @@ cat <<EOF
 
 Deployed to $TARGET:$REMOTE_DIR
 
-Two secrets still need entering, on the server, so they never touch a command
-line or an scp:
+Three secrets still need entering, on the server, so they never touch a
+command line or an scp:
 
   ssh $TARGET
   cd $REMOTE_DIR
@@ -152,7 +156,12 @@ line or an scp:
   #    No sudo needed: this command writes nothing, it just prints.
   ./goldstar passwd | grep GOLDSTAR_PASSWORD_HASH >> .env
 
-  # 2. Gemini key — read -rs keeps the value out of bash history
+  # 2. database encryption key — the database will not open without this.
+  #    Keep a copy of it somewhere other than the server: the database is
+  #    permanently unreadable without it, backups included.
+  ./goldstar db-key-gen | grep GOLDSTAR_DB_KEY >> .env
+
+  # 3. Gemini key — read -rs keeps the value out of bash history
   read -rs -p 'Gemini API key: ' K && printf 'GEMINI_API_KEY=%s\n' "\$K" >> .env && unset K
 
   # optional: require a username as well as a password

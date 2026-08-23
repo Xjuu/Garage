@@ -1,15 +1,21 @@
-// Package store persists invoices in a local SQLite file. It uses the pure-Go
-// modernc.org/sqlite driver, so the binary needs no cgo and no system libsqlite
-// — that is what keeps Debian and CachyOS byte-identical.
+// Package store persists invoices in a local, encrypted-at-rest SQLite file.
+// It uses github.com/mutecomm/go-sqlcipher/v4 — SQLCipher compiled with its
+// own bundled libtomcrypt, not system OpenSSL, so the resulting binary still
+// has no runtime dependency on anything the host doesn't already have
+// (verified: `ldd` on the built binary shows nothing beyond libc). The one
+// real cost is cgo itself: the build needs a C compiler now, unlike the
+// previous pure-Go modernc.org/sqlite driver, which is why deploy/update.sh
+// sets CGO_ENABLED=1.
 package store
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mutecomm/go-sqlcipher/v4"
 )
 
 type Store struct{ db *sql.DB }
@@ -280,8 +286,26 @@ WHERE i.vehicle_reg <> ''
   AND NOT EXISTS (SELECT 1 FROM vehicles v WHERE v.registration = i.vehicle_reg);
 `
 
-func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
+// Open opens (or creates) the database at path. key, if non-empty, must be
+// 64 hex characters (32 raw bytes) — SQLCipher's "raw key" form, which skips
+// its own PBKDF2 derivation since a machine-generated key is already high
+// entropy, unlike a human password. An empty key opens the file
+// unencrypted, which every production deployment must never do (see
+// realMain's own check in main.go) — tests are the one legitimate use,
+// where exercising encryption itself is redundant with store_test.go's
+// dedicated SQLCipher-path tests.
+func Open(path, key string) (*Store, error) {
+	dsn := path + "?_pragma=busy_timeout(5000)"
+	if key != "" {
+		if len(key) != 64 {
+			return nil, fmt.Errorf("db key must be 64 hex characters (32 bytes), got %d", len(key))
+		}
+		if _, err := hex.DecodeString(key); err != nil {
+			return nil, fmt.Errorf("db key must be hex: %w", err)
+		}
+		dsn += "&_pragma_key=x'" + key + "'"
+	}
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}

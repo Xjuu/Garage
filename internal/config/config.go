@@ -82,6 +82,21 @@ type Config struct {
 	// password, since it's one small crew logging a service on a shared
 	// device rather than individual named users.
 	RepairsPIN string
+
+	// DBKey encrypts the SQLite file at rest (SQLCipher) — 64 hex characters
+	// (32 raw bytes), generated with `goldstar db-key-gen`. Deliberately an
+	// env-only setting with no DataDir file fallback, unlike PasswordHash or
+	// RepairsPIN above: the whole point is that a copy of the data directory
+	// (a stolen backup, a leaked disk image) must not carry its own key
+	// alongside it. It lives in .env instead, which sits beside the binary,
+	// not inside DataDir, so the two are never in the same place to leak
+	// together.
+	DBKey string
+	// AllowUnencryptedDB is the explicit opt-out for DBKey, same shape as
+	// AllowNoPassword above — a throwaway local/dev database is a legitimate
+	// reason to skip it, but that has to be a deliberate choice, not a
+	// missing setting silently degrading a real install to plaintext.
+	AllowUnencryptedDB bool
 }
 
 // Load reads .env files (first found wins) then overlays real environment
@@ -99,27 +114,29 @@ func Load() (*Config, error) {
 	}
 
 	c := &Config{
-		IMAPHost:        envStr("IMAP_HOST", "imap.hostinger.com"),
-		IMAPPort:        envInt("IMAP_PORT", 993),
-		IMAPUser:        envStr("IMAP_USER", ""),
-		IMAPPass:        envStr("IMAP_PASS", ""),
-		IMAPMailbox:     envStr("IMAP_MAILBOX", "INBOX"),
-		GeminiKey:       envStr("GEMINI_API_KEY", envStr("GOOGLE_API_KEY", "")),
-		GeminiModel:     envStr("GEMINI_MODEL", "gemini-3.1-flash-lite"),
-		User:            envStr("GOLDSTAR_USER", ""),
-		Email:           envStr("GOLDSTAR_EMAIL", ""),
-		SyncEvery:       envStr("GOLDSTAR_SYNC_EVERY", "1h"),
-		SyncMinute:      envIntPtr("GOLDSTAR_SYNC_MINUTE"),
-		SyncAt:          envStr("GOLDSTAR_SYNC_AT", ""),
-		SyncTZ:          envStr("GOLDSTAR_SYNC_TZ", "Europe/London"),
-		BackupKeep:      envInt("GOLDSTAR_BACKUP_KEEP", 14),
-		DataDir:         envStr("DATA_DIR", defaultDataDir(home)),
-		WebAddr:         envStr("WEB_ADDR", "127.0.0.1:8787"),
-		LookbackDays:    envInt("LOOKBACK_DAYS", 7),
-		PasswordHash:    envStr("GOLDSTAR_PASSWORD_HASH", ""),
-		CookieSecure:    envBool("GOLDSTAR_COOKIE_SECURE", false),
-		AllowNoPassword: envBool("GOLDSTAR_ALLOW_NO_PASSWORD", false),
-		RepairsPIN:      envStr("GOLDSTAR_REPAIRS_PIN", ""),
+		IMAPHost:           envStr("IMAP_HOST", "imap.hostinger.com"),
+		IMAPPort:           envInt("IMAP_PORT", 993),
+		IMAPUser:           envStr("IMAP_USER", ""),
+		IMAPPass:           envStr("IMAP_PASS", ""),
+		IMAPMailbox:        envStr("IMAP_MAILBOX", "INBOX"),
+		GeminiKey:          envStr("GEMINI_API_KEY", envStr("GOOGLE_API_KEY", "")),
+		GeminiModel:        envStr("GEMINI_MODEL", "gemini-3.1-flash-lite"),
+		User:               envStr("GOLDSTAR_USER", ""),
+		Email:              envStr("GOLDSTAR_EMAIL", ""),
+		SyncEvery:          envStr("GOLDSTAR_SYNC_EVERY", "1h"),
+		SyncMinute:         envIntPtr("GOLDSTAR_SYNC_MINUTE"),
+		SyncAt:             envStr("GOLDSTAR_SYNC_AT", ""),
+		SyncTZ:             envStr("GOLDSTAR_SYNC_TZ", "Europe/London"),
+		BackupKeep:         envInt("GOLDSTAR_BACKUP_KEEP", 14),
+		DataDir:            envStr("DATA_DIR", defaultDataDir(home)),
+		WebAddr:            envStr("WEB_ADDR", "127.0.0.1:8787"),
+		LookbackDays:       envInt("LOOKBACK_DAYS", 7),
+		PasswordHash:       envStr("GOLDSTAR_PASSWORD_HASH", ""),
+		CookieSecure:       envBool("GOLDSTAR_COOKIE_SECURE", false),
+		AllowNoPassword:    envBool("GOLDSTAR_ALLOW_NO_PASSWORD", false),
+		RepairsPIN:         envStr("GOLDSTAR_REPAIRS_PIN", ""),
+		DBKey:              envStr("GOLDSTAR_DB_KEY", ""),
+		AllowUnencryptedDB: envBool("GOLDSTAR_ALLOW_UNENCRYPTED_DB", false),
 	}
 
 	// Mailbox settings saved from the admin page override the .env file, since

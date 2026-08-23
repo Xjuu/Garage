@@ -13,12 +13,91 @@ import (
 // the same open path, and these tests are cheap enough to use a real file.
 func open(t *testing.T) *Store {
 	t.Helper()
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"), "")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+// ── encryption at rest ───────────────────────────────────────────────────
+// Every other test in this package opens with an empty key deliberately —
+// SQLCipher's own crypto correctness isn't this package's job to re-prove.
+// What IS this package's job: that Open actually plumbs a key through to
+// the driver at all, that two different keys really do produce two
+// different unreadable files rather than silently succeeding either way,
+// and that a malformed key is rejected up front rather than surfacing as a
+// confusing failure three calls later.
+
+const testKeyA = "79d201e62c8fa1d76a92c38bb5ccef1bc283ef1bc55ebc7290dfa63a4b66479c"
+const testKeyB = "cb0e24aafa89c6e503a72c0f022c1da678205824533d8686b6723fd5f5b81617"
+
+func TestOpenWithAKeyProducesAGenuinelyEncryptedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := Open(path, testKeyA)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	db.Close()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read raw file: %v", err)
+	}
+	// Every ordinary, unencrypted SQLite file starts with this exact magic —
+	// an encrypted one must not.
+	if len(raw) >= 16 && string(raw[:16]) == "SQLite format 3\x00" {
+		t.Fatalf("file is plain SQLite, not encrypted, despite a key being given")
+	}
+}
+
+func TestOpenWithTheWrongKeyFailsToRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := Open(path, testKeyA)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	db.Close()
+
+	wrong, err := Open(path, testKeyB)
+	if err == nil {
+		wrong.Close()
+		t.Fatalf("Open with the wrong key should have failed outright (applying the schema against a file it can't decrypt), but succeeded")
+	}
+}
+
+func TestOpenWithTheRightKeyReadsBackWhatWasWritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := Open(path, testKeyA)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	add(t, db, Invoice{InvoiceNumber: "ENC-1", InvoiceDate: "2026-08-01", Brutto: 123.45})
+	db.Close()
+
+	reopened, err := Open(path, testKeyA)
+	if err != nil {
+		t.Fatalf("reopen with the same key: %v", err)
+	}
+	defer reopened.Close()
+
+	if has, err := reopened.HasFile("ENC-1-sha"); err != nil || !has {
+		t.Fatalf("HasFile after reopening with the correct key = %v, %v; want true, nil", has, err)
+	}
+}
+
+func TestOpenRejectsAMalformedKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	for _, bad := range []string{
+		"too-short",
+		"not-hex-but-64-characters-long-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+		testKeyA + "00", // 66 chars — one byte too many
+	} {
+		if _, err := Open(path, bad); err == nil {
+			t.Fatalf("Open accepted a malformed key: %q", bad)
+		}
+	}
 }
 
 func add(t *testing.T, db *Store, inv Invoice) int64 {
@@ -262,7 +341,7 @@ func TestCheckpointFoldsWALIntoTheDatabase(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.db")
 
-	db, err := Open(path)
+	db, err := Open(path, "")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -284,7 +363,7 @@ func TestCheckpointFoldsWALIntoTheDatabase(t *testing.T) {
 	os.Remove(path + "-wal")
 	os.Remove(path + "-shm")
 
-	again, err := Open(path)
+	again, err := Open(path, "")
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

@@ -19,7 +19,7 @@ func writeCSV(t *testing.T, body string) string {
 
 func openDB(t *testing.T) *store.Store {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"), "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,9 @@ import (
 
 	"bufio"
 	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -49,6 +52,10 @@ Usage:
   goldstar eval      Re-extract every completed example and score the accuracy
   goldstar serve     Serve the dashboard (default 127.0.0.1:8787)
   goldstar passwd    Generate the dashboard password hash
+  goldstar db-key-gen  Generate a database encryption key for GOLDSTAR_DB_KEY
+  goldstar db-encrypt  One-time migration: encrypts data/goldstar.db in place with
+                     GOLDSTAR_DB_KEY. Stop the service first. Safe to run any
+                     time — a no-op once it's already encrypted with that key.
   goldstar repairs-pin-rehash  One-time migration: hashes data/repairs.pin in place
                      if it still holds a PIN from before this was hashed at rest.
                      Safe to run any time — a no-op once it's already hashed.
@@ -108,12 +115,29 @@ func realMain(cmd string) error {
 	if cmd == "repairs-pin-rehash" {
 		return repairsPinRehash(cfg)
 	}
+	if cmd == "db-key-gen" {
+		return dbKeyGen()
+	}
+	if cmd == "db-encrypt" {
+		return dbEncrypt(cfg)
+	}
 
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
 	}
 
-	db, err := store.Open(cfg.DBPath())
+	// A key is required unless explicitly waived — same shape as the
+	// password check in internal/web.New, but this one gates DB access
+	// itself, so it applies to every subcommand that opens the database
+	// (backup, fleet-import, serve, …), not just the web server.
+	if cfg.DBKey == "" && !cfg.AllowUnencryptedDB {
+		return fmt.Errorf(
+			"refusing to open the database without an encryption key.\n" +
+				"  Run `goldstar db-key-gen` and put the printed line in your .env.\n" +
+				"  If this really is a throwaway local database, set GOLDSTAR_ALLOW_UNENCRYPTED_DB=true.")
+	}
+
+	db, err := store.Open(cfg.DBPath(), cfg.DBKey)
 	if err != nil {
 		return err
 	}
@@ -297,6 +321,160 @@ func repairsPinRehash(cfg *config.Config) error {
 	fmt.Println("repairs.pin has been rehashed in place.")
 	fmt.Println("A running `goldstar serve` already hashes it in memory on its own and needs no restart for this — the file just now matches what's already true in memory.")
 	return nil
+}
+
+// dbKeyGen prints a fresh, properly random database encryption key in the
+// line to add to .env — mirroring passwd's UX, the same reason it exists:
+// generating a high-entropy key by hand is the wrong thing to ask anyone to
+// do themselves.
+func dbKeyGen() error {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return fmt.Errorf("generate key: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "\nAdd this line to the .env beside the binary:\n\n")
+	fmt.Printf("GOLDSTAR_DB_KEY=%s\n", hex.EncodeToString(key))
+	fmt.Fprintf(os.Stderr, "\nKeep a copy of this somewhere other than the server — the database is\n"+
+		"permanently unreadable without it, backups included. Once .env has the\n"+
+		"key, run `goldstar db-encrypt` (with the service stopped) to migrate an\n"+
+		"existing plaintext database in place.\n")
+	return nil
+}
+
+// sqlitePlainMagic is the first 16 bytes of every ordinary, unencrypted
+// SQLite file — an encrypted (or corrupt) one will never start with this.
+const sqlitePlainMagic = "SQLite format 3\x00"
+
+// dbEncrypt migrates data/goldstar.db from plaintext to encrypted in place,
+// for an install whose database predates DBKey being required. Idempotent
+// in the safe direction: a database that's already encrypted with the
+// configured key is left alone rather than re-migrated; one that looks
+// encrypted with a DIFFERENT key (or is simply corrupt) is refused rather
+// than guessed at. Must run with the service stopped — this opens the file
+// directly, outside anything `goldstar serve` itself manages.
+func dbEncrypt(cfg *config.Config) error {
+	if cfg.DBKey == "" {
+		return fmt.Errorf("GOLDSTAR_DB_KEY is not set — run `goldstar db-key-gen` first and add the printed line to .env")
+	}
+	path := cfg.DBPath()
+	header, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No database file yet at", path, "— nothing to migrate. It will be created encrypted on first run.")
+			return nil
+		}
+		return err
+	}
+	if len(header) < 16 || string(header[:16]) != sqlitePlainMagic {
+		// Not plaintext. Confirm it's already encrypted with THIS key before
+		// declaring victory — a file that fails to open with the current
+		// key is a different, more serious problem this must not paper
+		// over.
+		probe, err := sql.Open("sqlite3", path+"?_pragma_key=x'"+cfg.DBKey+"'")
+		if err == nil {
+			_, err = probe.Exec(`SELECT count(*) FROM sqlite_master`)
+		}
+		if probe != nil {
+			probe.Close()
+		}
+		if err == nil {
+			fmt.Println("Database is already encrypted with the configured key — nothing to do.")
+			return nil
+		}
+		return fmt.Errorf(
+			"the database at %s is neither plain SQLite nor readable with the configured key.\n"+
+				"Refusing to touch it — this needs a human to look at it, not a guess.", path)
+	}
+
+	tmpPath := path + ".encrypting"
+	os.Remove(tmpPath) // a stale leftover from an interrupted previous attempt
+
+	plain, err := sql.Open("sqlite3", path)
+	if err != nil {
+		return fmt.Errorf("open plaintext db: %w", err)
+	}
+	defer plain.Close()
+
+	counts, err := tableCounts(plain)
+	if err != nil {
+		return fmt.Errorf("count rows before migrating: %w", err)
+	}
+
+	if _, err := plain.Exec(`ATTACH DATABASE ? AS encrypted KEY "x'` + cfg.DBKey + `'"`, tmpPath); err != nil {
+		return fmt.Errorf("attach encrypted target: %w", err)
+	}
+	if _, err := plain.Exec(`SELECT sqlcipher_export('encrypted')`); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("sqlcipher_export: %w", err)
+	}
+	if _, err := plain.Exec(`DETACH DATABASE encrypted`); err != nil {
+		return fmt.Errorf("detach: %w", err)
+	}
+	plain.Close()
+
+	enc, err := sql.Open("sqlite3", tmpPath+"?_pragma_key=x'"+cfg.DBKey+"'")
+	if err != nil {
+		return fmt.Errorf("open the newly encrypted copy: %w", err)
+	}
+	newCounts, err := tableCounts(enc)
+	enc.Close()
+	if err != nil {
+		return fmt.Errorf("count rows after migrating: %w", err)
+	}
+	for table, want := range counts {
+		if newCounts[table] != want {
+			os.Remove(tmpPath)
+			return fmt.Errorf(
+				"row count mismatch after migrating — aborted without touching the original.\n"+
+					"  %s: had %d row(s), encrypted copy has %d", table, want, newCounts[table])
+		}
+	}
+
+	backupPath := path + ".preencrypt-backup"
+	if err := os.Rename(path, backupPath); err != nil {
+		return fmt.Errorf("back up the original before swapping in the encrypted copy: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		// Put the original back rather than leave neither file at the real path.
+		os.Rename(backupPath, path)
+		return fmt.Errorf("swap in the encrypted copy: %w", err)
+	}
+
+	fmt.Printf("Migrated %s to encrypted-at-rest, verified against %d table(s) with matching row counts.\n", path, len(counts))
+	fmt.Println("The original plaintext file is kept at", backupPath, "— delete it once you've")
+	fmt.Println("confirmed `goldstar serve` starts and reads correctly with the new file.")
+	return nil
+}
+
+// tableCounts is dbEncrypt's before/after sanity check — every table the
+// schema defines, not just the obviously important ones, so a mismatch
+// anywhere aborts rather than only catching it in the tables someone
+// thought to check.
+func tableCounts(db *sql.DB) (map[string]int, error) {
+	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		return nil, err
+	}
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		tables = append(tables, name)
+	}
+	rows.Close()
+
+	counts := make(map[string]int, len(tables))
+	for _, t := range tables {
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM "` + t + `"`).Scan(&n); err != nil {
+			return nil, fmt.Errorf("count %s: %w", t, err)
+		}
+		counts[t] = n
+	}
+	return counts, nil
 }
 
 // passwd prompts twice without echoing and prints the line to add to .env.

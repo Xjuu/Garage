@@ -22,12 +22,20 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "==> Checking the build is sound before shipping it"
 cd "$HERE"
+export CGO_ENABLED=1
 go vet ./...
 go test ./... >/dev/null
 command -v node >/dev/null && node tools/ui-check.cjs >/dev/null
 
+# internal/store uses SQLCipher (github.com/mutecomm/go-sqlcipher/v4) for the
+# database's encryption at rest, which needs cgo and a C compiler — unlike
+# the pure-Go driver this replaced, so CGO_ENABLED=1 is no longer optional.
+# GOOS/GOARCH=linux/amd64 is a native build, not a cross-compile, as long as
+# this script itself runs on a linux/amd64 machine (it does here); running
+# it from a different OS/arch would need an actual cross-compiler toolchain
+# for cgo, which a pure-Go build never required.
 echo "==> Building for linux/$ARCH"
-CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" \
+GOOS=linux GOARCH="$ARCH" \
   go build -trimpath -ldflags="-s -w" -o /tmp/goldstar-update .
 
 echo "==> Uploading"
