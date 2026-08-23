@@ -1,6 +1,10 @@
 package web
 
-import "net/http"
+import (
+	"net/http"
+
+	"goldstar/internal/repairsauth"
+)
 
 // routesRepairsAdmin registers the dashboard-side management for the
 // repairs log — everything here sits behind the normal dashboard auth
@@ -42,6 +46,11 @@ func (s *Server) recentRepairsAdmin(r *http.Request) (any, error) {
 // parts site before it — this is a shared code for a shelf, not an
 // individual account, and reaching this endpoint already means the caller
 // passed the dashboard's own password-and-2FA login.
+//
+// Hashes the PIN itself, right here, before it ever reaches either the file
+// or the in-memory Auth — so repairs.pin never has the raw digits written
+// to it even for an instant, the same as how the dashboard's own
+// password-change flow hashes before persisting.
 func (s *Server) changeRepairsPIN(r *http.Request) (any, error) {
 	var body struct {
 		PIN string `json:"pin"`
@@ -52,9 +61,13 @@ func (s *Server) changeRepairsPIN(r *http.Request) (any, error) {
 	if len(body.PIN) < 4 || len(body.PIN) > 12 {
 		return nil, fail(http.StatusBadRequest, "PIN should be 4-12 digits")
 	}
-	if err := s.cfg.WriteRepairsPIN(body.PIN); err != nil {
+	hash, err := repairsauth.HashPIN(body.PIN)
+	if err != nil {
+		return nil, fail(http.StatusBadRequest, "%v", err)
+	}
+	if err := s.cfg.WriteRepairsPIN(hash); err != nil {
 		return nil, err
 	}
-	s.repairsAuth.SetPIN(body.PIN)
+	s.repairsAuth.SetPIN(hash)
 	return map[string]any{"ok": true, "message": "PIN changed"}, nil
 }

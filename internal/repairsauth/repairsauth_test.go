@@ -85,6 +85,85 @@ func TestSetPINTakesEffectLive(t *testing.T) {
 	}
 }
 
+// ── PIN hashing ───────────────────────────────────────────────────────────
+
+// The whole point: a PIN handed to New must never sit in memory as the raw
+// digits a person typed. Checked here via HashPIN's own decoder rather than
+// reflection into Auth's unexported field, so this test breaks the same way
+// a real caller relying on the format would.
+func TestNewStoresTheHashNotTheRawPIN(t *testing.T) {
+	a := newTestAuth(t, "112233")
+	if a.pin == "112233" {
+		t.Fatalf("New stored the raw PIN instead of hashing it")
+	}
+	if !looksHashed(a.pin) {
+		t.Fatalf("New's stored value doesn't look like an argon2id hash: %q", a.pin)
+	}
+	if !verifyPIN("112233", a.pin) {
+		t.Fatalf("the stored hash doesn't actually verify the PIN it was given")
+	}
+}
+
+func TestSetPINAlsoHashesRatherThanStoringRaw(t *testing.T) {
+	a := newTestAuth(t, "112233")
+	a.SetPIN("998877")
+	if a.pin == "998877" {
+		t.Fatalf("SetPIN stored the raw PIN instead of hashing it")
+	}
+	if !looksHashed(a.pin) {
+		t.Fatalf("SetPIN's stored value doesn't look like an argon2id hash: %q", a.pin)
+	}
+}
+
+// New and SetPIN both have to accept a value that's already hashed —
+// exactly what happens on every restart once repairs.pin holds a hash
+// instead of raw digits (see changeRepairsPIN, which hashes before ever
+// writing the file) — without hashing it a second time, which would just
+// make the real PIN permanently unmatchable.
+func TestNewAcceptsAnAlreadyHashedPINWithoutDoubleHashing(t *testing.T) {
+	hash, err := HashPIN("445566")
+	if err != nil {
+		t.Fatalf("HashPIN: %v", err)
+	}
+	a := newTestAuth(t, hash)
+	if a.pin != hash {
+		t.Fatalf("New re-hashed an already-hashed value instead of using it as-is:\n got  %q\n want %q", a.pin, hash)
+	}
+	if err := a.CheckPIN(req("1.2.3.4"), "445566"); err != nil {
+		t.Fatalf("CheckPIN against a PIN loaded pre-hashed: %v", err)
+	}
+}
+
+func TestSetPINAcceptsAnAlreadyHashedPINWithoutDoubleHashing(t *testing.T) {
+	a := newTestAuth(t, "112233")
+	hash, err := HashPIN("778899")
+	if err != nil {
+		t.Fatalf("HashPIN: %v", err)
+	}
+	a.SetPIN(hash)
+	if a.pin != hash {
+		t.Fatalf("SetPIN re-hashed an already-hashed value instead of using it as-is")
+	}
+	if err := a.CheckPIN(req("1.2.3.4"), "778899"); err != nil {
+		t.Fatalf("CheckPIN against a PIN set pre-hashed: %v", err)
+	}
+}
+
+// A corrupt or foreign-looking hash (truncated, wrong field count, bad
+// base64) must fail closed like any wrong code, never panic — this is what
+// stands between a malformed repairs.pin and a crash loop.
+func TestVerifyPINFailsClosedOnGarbageHash(t *testing.T) {
+	for _, bad := range []string{
+		"", "not-a-hash-at-all", "argon2id$only$three$parts",
+		"argon2id$3$65536$4$not-base64!!!$alsonotbase64!!!",
+		pinHashPrefix + "3$65536$4$" + "AAAA" + "$" + "BBBB",
+	} {
+		if verifyPIN("112233", bad) {
+			t.Fatalf("verifyPIN accepted a garbage hash: %q", bad)
+		}
+	}
+}
+
 func TestIssueAndValidateDeviceRoundTrip(t *testing.T) {
 	a := newTestAuth(t, "112233")
 	w := httptest.NewRecorder()

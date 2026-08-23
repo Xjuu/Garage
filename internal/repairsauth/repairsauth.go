@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -24,12 +25,27 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/argon2"
 )
 
 const (
 	deviceCookie = "goldstar_repairs_device"
 	csrfCookie   = "goldstar_repairs_csrf"
 	deviceTTL    = 365 * 24 * time.Hour
+
+	// Same argon2id parameters internal/auth uses for the dashboard
+	// password. A 6-digit PIN's tiny search space (1,000,000 possible
+	// codes) means no cost factor stops an offline brute force once the
+	// hash itself has leaked — that's the rate limiter's job, not this
+	// one's. What this closes is the much plainer gap of the PIN sitting
+	// as readable digits in a config file or an admin's clipboard history.
+	pinArgonTime    = 3
+	pinArgonMemory  = 64 * 1024
+	pinArgonThreads = 4
+	pinArgonKeyLen  = 32
+	pinSaltLen      = 16
+	pinHashPrefix   = "argon2id$"
 )
 
 // ErrNoPIN means the site has nothing configured yet — every code is
@@ -38,7 +54,12 @@ var ErrNoPIN = errors.New("no PIN configured")
 
 type Auth struct {
 	pinMu sync.RWMutex
-	pin   string
+	// Always either "" (unconfigured) or an argon2id hash — never the raw
+	// digits. New and SetPIN both normalize whatever they're given (see
+	// hashIfNeeded), so a caller can pass either the raw PIN a human typed
+	// or an already-hashed value read back from disk without this ever
+	// double-hashing or storing plaintext.
+	pin string
 
 	secret  []byte
 	secure  bool
@@ -49,13 +70,23 @@ type Auth struct {
 // gating on pin. An empty pin is valid — it just means CheckPIN rejects
 // everything until SetPIN is called later, e.g. once an admin sets one from
 // the dashboard.
+//
+// pin may be either the raw digits (the historical .env / repairs.pin
+// format, and still how GOLDSTAR_REPAIRS_PIN is set) or an already-hashed
+// value (what repairs.pin holds after this Auth — or an admin's PIN change
+// — has written it back out) — hashIfNeeded tells the two apart, so either
+// source boots correctly without ever double-hashing.
 func New(pin, secretPath string, secure bool) (*Auth, error) {
 	secret, err := loadOrCreateSecret(secretPath)
 	if err != nil {
 		return nil, err
 	}
+	hashed, err := hashIfNeeded(strings.TrimSpace(pin))
+	if err != nil {
+		return nil, err
+	}
 	return &Auth{
-		pin: strings.TrimSpace(pin), secret: secret, secure: secure,
+		pin: hashed, secret: secret, secure: secure,
 		limiter: newLimiter(8, 15*time.Minute),
 	}, nil
 }
@@ -68,11 +99,19 @@ func (a *Auth) Configured() bool {
 }
 
 // SetPIN changes the PIN live, without a service restart — mirroring how
-// the dashboard's own password can be changed from the Admin page.
+// the dashboard's own password can be changed from the Admin page. Accepts
+// either raw digits or an already-hashed value, same as New.
 func (a *Auth) SetPIN(pin string) {
+	hashed, err := hashIfNeeded(strings.TrimSpace(pin))
+	if err != nil {
+		// Only fails on a hashing error (e.g. a bad RNG read), never on the
+		// PIN's own content — nothing sane to do here but drop the change
+		// rather than lock every device out on a corrupt in-memory PIN.
+		return
+	}
 	a.pinMu.Lock()
 	defer a.pinMu.Unlock()
-	a.pin = strings.TrimSpace(pin)
+	a.pin = hashed
 }
 
 // CheckPIN validates a submitted code, rate-limited per client IP so a
@@ -83,17 +122,77 @@ func (a *Auth) CheckPIN(r *http.Request, code string) error {
 		return errors.New("too many attempts, try again later")
 	}
 	a.pinMu.RLock()
-	pin := a.pin
+	hash := a.pin
 	a.pinMu.RUnlock()
-	if pin == "" {
+	if hash == "" {
 		return ErrNoPIN
 	}
-	if subtle.ConstantTimeCompare([]byte(strings.TrimSpace(code)), []byte(pin)) != 1 {
+	if !verifyPIN(strings.TrimSpace(code), hash) {
 		a.limiter.fail(ip)
 		return errors.New("incorrect code")
 	}
 	a.limiter.reset(ip)
 	return nil
+}
+
+// looksHashed reports whether s is already one of our encoded hashes,
+// rather than raw PIN digits — the same "argon2id$…" shape
+// internal/auth.HashPassword produces, kept independent here rather than
+// imported (see this file's own package doc on why).
+func looksHashed(s string) bool { return strings.HasPrefix(s, pinHashPrefix) }
+
+// hashIfNeeded normalizes whatever New or SetPIN was handed — the raw
+// digits a human typed, or a hash already read back from repairs.pin — into
+// the one form CheckPIN ever compares against, without risking hashing an
+// already-hashed value a second time (which would just make it permanently
+// unmatchable).
+func hashIfNeeded(pin string) (string, error) {
+	if pin == "" || looksHashed(pin) {
+		return pin, nil
+	}
+	return HashPIN(pin)
+}
+
+// HashPIN produces the encoded string CheckPIN verifies against — the same
+// "argon2id$t$m$p$salt$hash" shape internal/auth.HashPassword uses for the
+// dashboard password, but without that function's 10-character minimum,
+// which a 6-digit PIN could never clear. Exported so the admin-page handler
+// that changes the PIN can hash it before persisting, the same way the
+// dashboard's own password-change flow does.
+func HashPIN(pin string) (string, error) {
+	if pin == "" {
+		return "", errors.New("PIN must not be empty")
+	}
+	salt := make([]byte, pinSaltLen)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	key := argon2.IDKey([]byte(pin), salt, pinArgonTime, pinArgonMemory, pinArgonThreads, pinArgonKeyLen)
+	return fmt.Sprintf("%s%d$%d$%d$%s$%s", pinHashPrefix,
+		pinArgonTime, pinArgonMemory, pinArgonThreads,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(key)), nil
+}
+
+// verifyPIN checks a candidate code against an encoded hash in constant
+// time. An unrecognized or corrupt hash fails closed, the same as a wrong
+// code — never a crash, and never treated as "no PIN configured" (that's
+// reserved for a genuinely empty hash, handled by CheckPIN itself).
+func verifyPIN(pin, hash string) bool {
+	parts := strings.Split(hash, "$")
+	if len(parts) != 6 || parts[0]+"$" != pinHashPrefix {
+		return false
+	}
+	t, err1 := strconv.Atoi(parts[1])
+	m, err2 := strconv.Atoi(parts[2])
+	p, err3 := strconv.Atoi(parts[3])
+	salt, err4 := base64.RawStdEncoding.DecodeString(parts[4])
+	want, err5 := base64.RawStdEncoding.DecodeString(parts[5])
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil || err5 != nil {
+		return false
+	}
+	got := argon2.IDKey([]byte(pin), salt, uint32(t), uint32(m), uint8(p), uint32(len(want)))
+	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
 // IssueDevice mints a fresh device id, signs it into a long-lived cookie,
