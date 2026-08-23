@@ -136,6 +136,16 @@ function serviceTypeLabel(r) {
 // Every spec field is optional and only ever arrives once a repair visit
 // has supplied it — the whole grid stays hidden until at least one exists,
 // rather than showing a vehicle's page full of empty cards by default.
+// The database stores it as a plain ISO date (no time component — a
+// service date is a day, never a moment) — this is purely a display
+// choice, reading it the way the rest of the country writes a date rather
+// than the raw "2024-04-13" a machine would.
+function ukDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return isNaN(d) ? esc(iso) : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 function renderVehicleSpec(v, lastTimingBelt, hasTimingBelt) {
   const card = (k, val, opts = {}) => {
     if (!val) return '';
@@ -148,7 +158,7 @@ function renderVehicleSpec(v, lastTimingBelt, hasTimingBelt) {
   // grid, set apart with the same ink-border treatment .tile.alert uses
   // for a number worth noticing — everything else is plain reference info.
   $('veh-spec').innerHTML = [
-    card('Last timing belt change', hasTimingBelt ? lastTimingBelt : '', { highlight: true, mono: true }),
+    card('Last timing belt change', hasTimingBelt ? ukDate(lastTimingBelt) : '', { highlight: true, mono: true }),
     card('Colour', v.colour),
     card('Fuel type', v.fuel_type),
     card('Cylinder capacity', v.cylinder_capacity),
