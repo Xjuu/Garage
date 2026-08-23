@@ -1,10 +1,11 @@
-/* Boots the real repairs/app.js in a vm context with fake document activity
- * listeners and a fake, manually-advanceable timer — never a real 15-minute
- * wait — and exercises the auto sign-out-on-inactivity feature: no activity
- * for the full idle window signs the device out (same call the Sign out
- * button itself makes), any tracked activity resets the countdown rather
- * than letting it expire on schedule, and the countdown restarts fresh
- * after each reset rather than accumulating.
+/* Boots the real repairs/app.js in a vm context with fake document/window
+ * activity listeners and a fake, manually-advanceable timer — never a real
+ * 15-minute wait — and exercises both ways a device gets signed out
+ * automatically: no activity for the full idle window (same call the Sign
+ * out button itself makes, with activity correctly resetting rather than
+ * accumulating the countdown), and the tab actually closing — a separate
+ * pagehide listener, checked for the keepalive flag that's what actually
+ * lets that request survive page teardown.
  *
  * Usage: node tools/repairs-idle-logout-check.cjs
  * Exits non-zero if any check fails or app.js throws while loading.
@@ -91,6 +92,11 @@ async function fakeFetch(url, opts = {}) {
 }
 
 const errors = [];
+// window === ctx (aliased below), so a top-level addEventListener here is
+// what app.js's own window.addEventListener('pagehide', ...) call
+// resolves to — captured the same way as docListeners, so this test can
+// fire it directly.
+const windowListeners = {};
 const ctx = vm.createContext({
   console,
   document: {
@@ -100,6 +106,7 @@ const ctx = vm.createContext({
     cookie: 'goldstar_repairs_csrf=test-csrf-token',
     addEventListener(ev, fn) { (docListeners[ev] ??= []).push(fn); },
   },
+  addEventListener(ev, fn) { (windowListeners[ev] ??= []).push(fn); },
   location: { href: '' },
   setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout,
   fetch: fakeFetch,
@@ -151,6 +158,20 @@ function simulateActivity() {
   const loggedOut = fetchCalls.find((c) => c.url === '/api/repairs/logout' && c.opts.method === 'POST');
   ok(!!loggedOut, '15 minutes with no activity signs the device out via POST /api/repairs/logout');
   ok(ctx.location.href === '/', 'and sends the browser back to the sign-in screen');
+
+  // Closing the tab must not wait for the idle timer at all — a separate
+  // pagehide listener signs the device out immediately, with keepalive
+  // set so the request actually survives page teardown instead of being
+  // cancelled mid-flight like a normal fetch would be.
+  ok(!!windowListeners.pagehide && windowListeners.pagehide.length > 0,
+    'a pagehide listener is registered at all');
+  fetchCalls.length = 0;
+  windowListeners.pagehide.forEach((fn) => fn({}));
+  await new Promise((r) => setTimeout(r, 10));
+  const closedLogout = fetchCalls.find((c) => c.url === '/api/repairs/logout' && c.opts.method === 'POST');
+  ok(!!closedLogout, 'pagehide (closing the tab) also signs the device out via POST /api/repairs/logout');
+  ok(!!closedLogout && closedLogout.opts.keepalive === true,
+    'and marks the request keepalive, so it survives the page actually tearing down');
 
   process.exit(failed ? 1 : 0);
 })();

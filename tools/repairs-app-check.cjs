@@ -114,6 +114,11 @@ const ctx = vm.createContext({
   fetch: fakeFetch,
   Math, JSON, Object, Array, Number, String, Boolean, Date, Set, Map, Promise,
   encodeURIComponent, decodeURIComponent, URL,
+  // window === ctx below, so this is what app.js's own top-level
+  // window.addEventListener('pagehide', ...) call resolves to (see
+  // repairs-idle-logout-check.cjs for the harness that actually exercises
+  // that behaviour) — just needs to exist here so loading doesn't throw.
+  addEventListener() {},
 });
 ctx.window = ctx; ctx.globalThis = ctx;
 

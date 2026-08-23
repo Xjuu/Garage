@@ -990,9 +990,9 @@ function renderThisMonth(m) {
     { k: 'Bought this month', v: '£' + money(m.purchases), s: `including VAT · to day ${int(m.day_of_month)}` },
     trend,
     { k: 'VAT', v: '£' + money(m.vat), s: 'reclaimable input VAT' },
-    { k: 'Repairs', v: int(m.invoices - m.credit_count) },
+    { k: 'Invoices', v: int(m.invoices - m.credit_count) },
     {
-      k: 'Average / repair',
+      k: 'Average / Invoice',
       v: '£' + money((m.invoices - m.credit_count) ? m.purchases / (m.invoices - m.credit_count) : 0),
     },
   ];

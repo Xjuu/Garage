@@ -82,11 +82,29 @@ function scheduleIdleSignOut() {
   document.addEventListener(ev, scheduleIdleSignOut));
 scheduleIdleSignOut();
 
+// ── sign out the instant the tab actually closes ─────────────────────────
+// The idle timer alone means a device that's simply closed — not left
+// sitting open and idle — stays signed in server-side for up to 15 more
+// minutes with nobody able to even see the screen. pagehide fires
+// reliably on a real close or navigation-away, unlike beforeunload, which
+// browsers increasingly discourage. keepalive: true is what actually lets
+// this fetch finish during page teardown — a normal fetch here is
+// routinely cancelled by the browser before it ever leaves.
+window.addEventListener('pagehide', () => {
+  api('/api/repairs/logout', { method: 'POST', keepalive: true }).catch(() => {});
+});
+
 // ── state ─────────────────────────────────────────────────────────────────
 
 let currentReg = '';
 let serviceType = '';       // "full" | "mini" | "other"
 let timingBeltChanged = false; // defaults to No
+// The highest mileage on file across every past visit for currentReg — a
+// car's mileage only ever goes up, so this is what a new entry gets
+// checked against. Reset alongside currentReg itself, or a stale figure
+// from whichever vehicle was open before would silently carry over into a
+// check for a completely different car.
+let lastKnownMileage = 0;
 
 // ── registration: search, browse, pick or type freely ──────────────────────
 // Unlike the (now-removed) parts counter, a registration here does not have
@@ -184,6 +202,7 @@ $('new-reg-add').addEventListener('click', () => {
 
 function hideHistoryAndForm() {
   currentReg = '';
+  lastKnownMileage = 0;
   $('history-section').hidden = true;
   $('form').hidden = true;
   prefillSpec(null);
@@ -205,6 +224,11 @@ async function loadHistory(reg) {
   $('history-list').innerHTML = rows.length
     ? rows.map(renderVisit).join('')
     : '<div class="rp-empty">Nothing logged for this vehicle yet — this will be its first visit.</div>';
+
+  // The highest mileage on record, not just the most recent visit's own —
+  // a visit can be logged with mileage left blank, and the newest row
+  // being blank must not silently reset the floor back to zero.
+  lastKnownMileage = rows.reduce((max, r) => Math.max(max, r.mileage || 0), 0);
 
   // The most recent visit already carries a full spec snapshot (every visit
   // does — see LogRepair) — reuse it instead of asking the crew to retype a
@@ -293,6 +317,16 @@ $('form').addEventListener('submit', async (e) => {
   if (serviceType === 'other' && !serviceTypeOther) {
     err.textContent = 'Describe the service type.';
     $('service-type-other').focus();
+    return;
+  }
+  // A car's mileage only goes up — a lower reading than what's already on
+  // file is a typo, not a real visit, and must be caught here rather than
+  // silently logged. Leaving mileage blank is still fine; this only blocks
+  // an actually-entered number that goes backwards.
+  const mileageText = $('mileage').value.trim();
+  if (mileageText !== '' && Number(mileageText) < lastKnownMileage) {
+    err.textContent = `Mileage can't be lower than the last recorded ${Math.round(lastKnownMileage).toLocaleString('en-GB')} miles.`;
+    $('mileage').focus();
     return;
   }
 
