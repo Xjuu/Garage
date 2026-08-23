@@ -1,11 +1,14 @@
 /* Boots the real dashboard scripts (same one-shared-scope technique as
  * ui-check.cjs, for the same reason: a cross-file reference that only
  * throws when the files run in page order) and exercises how a returned
- * invoice renders in the Invoices table specifically: the row reads as
- * settled rather than needing attention (greyed text, not a "Check" red
- * edge), and its Parts column names the state instead of listing parts
- * that, credited, aren't really "in stock" any more — while an ordinary,
- * not-returned invoice on the same page is untouched by either.
+ * invoice and its credit note render on the Invoices page: the returned
+ * original's row reads as settled rather than needing attention (greyed
+ * text, not a "Check" red edge) with its Parts column naming the state
+ * instead of listing parts that, credited, aren't really "in stock" any
+ * more; the credit note itself is kept out of that table entirely and
+ * shown in its own separate "Credit notes" section instead, real part
+ * numbers and all; an ordinary, not-returned invoice is untouched by any
+ * of it.
  *
  * Usage: node tools/returned-invoice-check.cjs
  * Exits non-zero if any check fails or a script throws while loading.
@@ -119,31 +122,35 @@ function ok(cond, label) {
   await ctx.loadInvoices();
   await new Promise((r) => setTimeout(r, 10));
 
-  const html = store['inv-rows'].innerHTML;
-  const rowFor = (id) => {
+  const mainHTML = store['inv-rows'].innerHTML;
+  const creditHTML = store['credit-rows'].innerHTML;
+  const rowIn = (html, id) => {
     const m = html.match(new RegExp(`<tr[^>]*data-id="${id}"[\\s\\S]*?</tr>`));
     return m ? m[0] : '';
   };
 
-  const returnedRow = rowFor(RETURNED.ID);
+  const returnedRow = rowIn(mainHTML, RETURNED.ID);
   ok(returnedRow.includes('returned'), 'the returned original\'s row carries the "returned" class');
   ok(returnedRow.includes('Returned') && !returnedRow.includes('QA-PART-99'),
     'its Parts column says "Returned" instead of listing the (credited) part number');
   ok(!returnedRow.includes('flagged'),
     'a returned invoice does not also get the red "needs review" edge — it is settled, not a problem');
 
-  // A credit note IS the return, not a separate concept — its row on this
-  // list has to read exactly the same as the original's: grey, "Returned",
-  // no "Credit" pill of its own, and no part numbers listed even though
-  // this specific credit note carries two line items.
-  const creditRow = rowFor(CREDIT_NOTE.ID);
-  ok(creditRow.includes('returned'), 'the credit note\'s own row ALSO carries the "returned" class');
-  ok(creditRow.includes('Returned'), 'and shows the "Returned" pill, same as the original');
-  ok(!creditRow.includes('Credit</span>'), 'and does NOT show a separate "Credit" pill any more');
-  ok(!creditRow.includes('QA-PART-99') && !creditRow.includes('QA-PART-100'),
-    'neither of its two part numbers leaks into the Parts column');
+  // A credit note is the return itself, not just another purchase — it
+  // must not appear in the ordinary invoices table at all, only in its own
+  // separate "Credit notes" section, where its real part numbers show
+  // (this one has two) since that section is already unambiguously about
+  // what got returned.
+  ok(!mainHTML.includes(`data-id="${CREDIT_NOTE.ID}"`),
+    'the credit note does NOT appear in the main invoices table at all');
+  ok(!store['credits-title'].hidden && !store['credits-panel'].hidden,
+    'the Credit notes section becomes visible once there is a credit note to show');
+  const creditRow = rowIn(creditHTML, CREDIT_NOTE.ID);
+  ok(!!creditRow, 'the credit note appears in the separate Credit notes table instead');
+  ok(creditRow.includes('QA-PART-99') && creditRow.includes('QA-PART-100'),
+    'and shows its real part numbers there — both of its two line items');
 
-  const ordinaryRow = rowFor(ORDINARY.ID);
+  const ordinaryRow = rowIn(mainHTML, ORDINARY.ID);
   ok(!/class="clickable[^"]*returned/.test(ordinaryRow), 'an ordinary invoice\'s row does NOT carry the "returned" class');
   ok(ordinaryRow.includes('OESE020303'), 'an ordinary invoice still shows its real part number');
 

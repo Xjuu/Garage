@@ -164,6 +164,30 @@
         </span>
       </div>
     </div>
+
+    <!-- A credit note is the return itself, not just another purchase — kept
+         apart from the ordinary invoices above rather than mixed into the
+         same rows. The invoice it credits still shows "Returned" up there;
+         this is where the credit note's own row actually lives. -->
+    <div class="section-title" id="credits-title" hidden>Credit notes</div>
+    <div class="panel" id="credits-panel" hidden>
+      <div class="table-scroll">
+        <table>
+          <thead><tr>
+            <th>Date</th>
+            <th>Supplier</th>
+            <th>Invoice no.</th>
+            <th>Vehicle</th>
+            <th>Parts</th>
+            <th class="num">Net</th>
+            <th class="num">VAT</th>
+            <th class="num">Gross</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="credit-rows"></tbody>
+        </table>
+      </div>
+    </div>
   </section>
 
   <!-- Vehicles -->

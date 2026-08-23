@@ -308,28 +308,29 @@ async function loadInvoices() {
   $('inv-sub').textContent =
     `${int(data.total)} matching · net £${money(data.netto)} · VAT £${money(data.vat)} · gross £${money(data.brutto)}`;
 
-  $('inv-rows').innerHTML = data.invoices.length
-    ? data.invoices.map((inv) => {
-        // A credit note IS the return, not a separate thing from one — the
-        // list treats both the same at a glance (grey, "Returned"); which
-        // one you're actually looking at only matters once you click in
-        // (see the "credited" wording in the drawer).
-        const isReturn = inv.Returned || !!inv.CreditOf;
+  // A credit note is the return itself, not just another purchase — kept
+  // in its own section below rather than mixed into the ordinary invoices.
+  // The invoice it credits is what shows "Returned" up here.
+  const mainInvoices = data.invoices.filter((inv) => !inv.CreditOf);
+  const creditNotes = data.invoices.filter((inv) => inv.CreditOf);
+
+  $('inv-rows').innerHTML = mainInvoices.length
+    ? mainInvoices.map((inv) => {
         const parts = (inv.Items || [])
           .map((i) => i.PartNumber).filter(Boolean);
         const shown = parts.slice(0, 2).map((p) => `<span class="part">${esc(p)}</span>`).join(' ');
         const more = parts.length > 2 ? ` <span class="muted">+${parts.length - 2}</span>` : '';
         // A returned invoice's parts aren't what's actually here any more —
         // naming them in the row reads as current stock, which they're not.
-        const partsCell = isReturn
+        const partsCell = inv.Returned
           ? '<span class="muted">Returned</span>'
           : (shown || '<span class="muted">—</span>') + more;
         const status = [
           inv.NeedsReview ? '<span class="pill flag">Check</span>' : '',
-          isReturn ? '<span class="pill">Returned</span>' : '',
+          inv.Returned ? '<span class="pill">Returned</span>' : '',
         ].filter(Boolean).join(' ');
         return `
-        <tr class="clickable${inv.NeedsReview ? ' flagged' : ''}${isReturn ? ' returned' : ''}" data-id="${inv.ID}">
+        <tr class="clickable${inv.NeedsReview ? ' flagged' : ''}${inv.Returned ? ' returned' : ''}" data-id="${inv.ID}">
           <td class="mono">${dash(inv.InvoiceDate)}</td>
           <td class="truncate" title="${esc(inv.Supplier)}">${dash(inv.Supplier)}</td>
           <td class="mono">${dash(inv.InvoiceNumber)}</td>
@@ -347,6 +348,31 @@ async function loadInvoices() {
        </td></tr>`;
 
   $('inv-rows').querySelectorAll('tr[data-id]').forEach((tr) =>
+    tr.addEventListener('click', () => openInvoice(tr.dataset.id)));
+
+  // Only shown at all once there's actually a credit note on this page —
+  // an empty "Credit notes" section under a filter that has none of them
+  // is just clutter, not information.
+  $('credits-title').hidden = creditNotes.length === 0;
+  $('credits-panel').hidden = creditNotes.length === 0;
+  $('credit-rows').innerHTML = creditNotes.map((inv) => {
+    const parts = (inv.Items || []).map((i) => i.PartNumber).filter(Boolean);
+    const shown = parts.slice(0, 2).map((p) => `<span class="part">${esc(p)}</span>`).join(' ');
+    const more = parts.length > 2 ? ` <span class="muted">+${parts.length - 2}</span>` : '';
+    return `
+    <tr class="clickable${inv.NeedsReview ? ' flagged' : ''}" data-id="${inv.ID}">
+      <td class="mono">${dash(inv.InvoiceDate)}</td>
+      <td class="truncate" title="${esc(inv.Supplier)}">${dash(inv.Supplier)}</td>
+      <td class="mono">${dash(inv.InvoiceNumber)}</td>
+      <td>${inv.VehicleReg ? `<span class="reg">${esc(inv.VehicleReg)}</span>` : '<span class="muted">—</span>'}</td>
+      <td>${shown || '<span class="muted">—</span>'}${more}</td>
+      <td class="num">${money(inv.Netto)}</td>
+      <td class="num">${money(inv.VATAmount)}</td>
+      <td class="num strong">${money(inv.Brutto)}</td>
+      <td>${inv.NeedsReview ? '<span class="pill flag">Check</span>' : ''}</td>
+    </tr>`;
+  }).join('');
+  $('credit-rows').querySelectorAll('tr[data-id]').forEach((tr) =>
     tr.addEventListener('click', () => openInvoice(tr.dataset.id)));
 
   const from = data.total === 0 ? 0 : (state.page - 1) * state.per + 1;
