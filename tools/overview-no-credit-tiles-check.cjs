@@ -1,9 +1,12 @@
 /* Boots the real dashboard scripts (same shared-scope technique as
  * ui-check.cjs) and calls the real loadOverview with a response that has
- * live credit notes on it, proving the Overview tiles never mention
- * "Credit notes" or "Net of credits" — a credit note already shows where
- * it matters (greyed out as "Returned" in the Invoices list), not as a
- * second, separate concept surfaced here too.
+ * live credit notes on it, proving the Overview tiles — both the "all
+ * time" set AND the separate "This month" panel, which has its own
+ * independent tile list via renderThisMonth and its own separate "Credit
+ * notes" tile that got missed the first time this was fixed — never
+ * mention "Credit notes" or "Net of credits". A credit note already shows
+ * where it matters (its own separate section on the Invoices page), not as
+ * a second, separate concept surfaced on Overview too.
  *
  * Usage: node tools/overview-no-credit-tiles-check.cjs
  * Exits non-zero if any check fails or a script throws while loading.
@@ -47,6 +50,14 @@ const OVERVIEW = {
   netto: 1900, vat: 380, brutto: 2000,
   purchases: 2500, credits: -500, credit_count: 1, months: [],
 };
+// This month has its own entirely separate rendering path (renderThisMonth)
+// with its own tile list — a live credit note here too, so both paths are
+// covered, not just the "all time" one.
+const THIS_MONTH = {
+  month: 'August 2026', day_of_month: 23, has_prev: false,
+  purchases: 900, vat: 180, brutto: 800, invoices: 5,
+  credits: -100, credit_count: 1,
+};
 
 const errors = [];
 const ctx = vm.createContext({
@@ -62,7 +73,7 @@ const ctx = vm.createContext({
   setTimeout, clearTimeout, setInterval: () => 0, clearInterval() {},
   fetch: async (url) => {
     if (url.startsWith('/api/overview')) {
-      return { ok: true, status: 200, json: async () => ({ overview: OVERVIEW, this_month: {} }) };
+      return { ok: true, status: 200, json: async () => ({ overview: OVERVIEW, this_month: THIS_MONTH }) };
     }
     if (url.startsWith('/api/vehicles')) {
       return { ok: true, status: 200, json: async () => [] };
@@ -101,6 +112,14 @@ function ok(cond, label) {
   ok(html.includes('Purchases'), 'Overview still shows the Purchases tile');
   ok(!html.includes('Credit notes'), 'Overview does NOT show a "Credit notes" tile, even with a live credit note');
   ok(!html.includes('Net of credits'), 'Overview does NOT show a "Net of credits" tile either');
+
+  // renderThisMonth is a completely separate code path with its own tile
+  // list — easy to fix one and miss the other, which is exactly what
+  // happened here the first time.
+  const monthHTML = store['month-tiles'].innerHTML;
+  ok(monthHTML.includes('Bought this month'), 'This month panel still shows its headline spend tile');
+  ok(!monthHTML.includes('Credit notes'),
+    'This month panel does NOT show a "Credit notes" tile either, even with a live credit note');
 
   process.exit(failed ? 1 : 0);
 })();

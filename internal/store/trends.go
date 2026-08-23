@@ -289,9 +289,12 @@ func (s *Store) ThisMonth(now time.Time) (*MonthToDate, error) {
 	day := now.Day()
 
 	out := &MonthToDate{Month: start.Format("January 2006"), DayOfMonth: day}
+	// Purchases excludes a returned invoice's amount entirely, same reasoning
+	// as Overview's own Purchases figure — the money came back, so it was
+	// never really this month's spend.
 	err := s.db.QueryRow(`
 		SELECT COUNT(1), COALESCE(SUM(netto),0), COALESCE(SUM(vat_amount),0), COALESCE(SUM(brutto),0),
-		       COALESCE(SUM(CASE WHEN brutto >= 0 THEN brutto ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN brutto >= 0 AND returned = 0 THEN brutto ELSE 0 END),0),
 		       COALESCE(SUM(CASE WHEN brutto <  0 THEN brutto ELSE 0 END),0),
 		       COALESCE(SUM(CASE WHEN brutto <  0 THEN 1 ELSE 0 END),0)
 		FROM invoices WHERE invoice_date >= ? AND invoice_date <= ?`,

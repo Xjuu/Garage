@@ -983,9 +983,9 @@ function renderThisMonth(m) {
   }
 
   $('month-title').textContent = m.month;
-  // Credit notes are shown as their own tile rather than netted away. One big
-  // credit can otherwise turn a month of real purchasing into a negative
-  // "spend" figure that reads as an error.
+  // "Bought this month" already excludes a returned invoice's amount (see
+  // ThisMonth's own SQL) — a credit note is already accounted for right
+  // there, not as a second, separate tile of its own.
   const monthTiles = [
     { k: 'Bought this month', v: '£' + money(m.purchases), s: `including VAT · to day ${int(m.day_of_month)}` },
     trend,
@@ -996,12 +996,6 @@ function renderThisMonth(m) {
       v: '£' + money((m.invoices - m.credit_count) ? m.purchases / (m.invoices - m.credit_count) : 0),
     },
   ];
-  if (m.credit_count > 0) {
-    monthTiles.push({
-      k: 'Credit notes', v: '−£' + money(Math.abs(m.credits)),
-      s: `${int(m.credit_count)} note(s) · net £${money(m.brutto)} after credits`,
-    });
-  }
   $('month-tiles').innerHTML = monthTiles.map((t) => `
     <div class="tile">
       <div class="k">${esc(t.k)}</div>

@@ -504,18 +504,18 @@ type Overview struct {
 
 func (s *Store) Overview() (*Overview, error) {
 	var o Overview
-	// Purchases and credit notes are summed separately. A credit note is stored
-	// with negative totals, which is arithmetically right — it does reduce the
-	// VAT you reclaim — but netting them into a single "spend" figure is
-	// misleading: one large credit can turn a month of real purchasing into a
-	// negative number that reads as nonsense.
+	// Purchases is what was actually spent — a returned invoice's money came
+	// back, so it does not belong in a spend total at all, same as its
+	// credit note (already excluded by brutto >= 0) never did. Invoices,
+	// Netto, VAT and Brutto stay as true raw totals across everything,
+	// unaffected — Purchases is the one figure this excludes returns from.
 	err := s.db.QueryRow(`
 		SELECT COUNT(1),
 		       COALESCE(SUM(netto),0), COALESCE(SUM(vat_amount),0), COALESCE(SUM(brutto),0),
 		       COALESCE(SUM(needs_review),0),
 		       COUNT(DISTINCT NULLIF(vehicle_reg,'')),
 		       COUNT(DISTINCT NULLIF(supplier,'')),
-		       COALESCE(SUM(CASE WHEN brutto >= 0 THEN brutto ELSE 0 END),0),
+		       COALESCE(SUM(CASE WHEN brutto >= 0 AND returned = 0 THEN brutto ELSE 0 END),0),
 		       COALESCE(SUM(CASE WHEN brutto <  0 THEN brutto ELSE 0 END),0),
 		       COALESCE(SUM(CASE WHEN brutto <  0 THEN 1 ELSE 0 END),0)
 		FROM invoices`).

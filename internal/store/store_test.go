@@ -314,6 +314,37 @@ func TestOverviewSeparatesCreditNotes(t *testing.T) {
 	}
 }
 
+// A returned invoice's money came back — its full amount must not sit in
+// Purchases at all, not even before its credit note (excluded already by
+// being negative) gets involved. Otherwise a returned invoice inflates the
+// spend total with nothing anywhere to explain why the number looks too
+// high.
+func TestOverviewExcludesReturnedInvoicesFromPurchases(t *testing.T) {
+	db := open(t)
+	keptID := add(t, db, Invoice{InvoiceNumber: "HS1", InvoiceDate: "2026-08-03",
+		Netto: 100, VATAmount: 20, Brutto: 120})
+	returnedID := add(t, db, Invoice{InvoiceNumber: "HS2", InvoiceDate: "2026-08-04",
+		Netto: 250, VATAmount: 50, Brutto: 300})
+	_ = keptID
+	if err := db.MarkReturned(returnedID); err != nil {
+		t.Fatalf("MarkReturned: %v", err)
+	}
+
+	o, err := db.Overview()
+	if err != nil {
+		t.Fatalf("overview: %v", err)
+	}
+	if o.Purchases != 120 {
+		t.Errorf("purchases = %v, want 120 (the returned £300 invoice must be excluded)", o.Purchases)
+	}
+	// Brutto is the true raw total across everything — it still includes the
+	// returned invoice's amount, since that is genuinely what was invoiced.
+	// Only Purchases, the "what did we actually spend" figure, excludes it.
+	if o.Brutto != 420 {
+		t.Errorf("brutto (raw total) = %v, want 420 — it must NOT also exclude the returned invoice", o.Brutto)
+	}
+}
+
 func TestThisMonthSeparatesCreditNotes(t *testing.T) {
 	db := open(t)
 	add(t, db, Invoice{InvoiceNumber: "HS1", InvoiceDate: "2026-08-03", Brutto: 120, Netto: 100, VATAmount: 20})
@@ -331,6 +362,29 @@ func TestThisMonthSeparatesCreditNotes(t *testing.T) {
 	}
 	if m.CreditCount != 1 {
 		t.Errorf("credit count = %d, want 1", m.CreditCount)
+	}
+}
+
+// Same exclusion as Overview's own Purchases figure, for the monthly one —
+// a returned invoice's money came back, so it must not count as this
+// month's spend.
+func TestThisMonthExcludesReturnedInvoicesFromPurchases(t *testing.T) {
+	db := open(t)
+	add(t, db, Invoice{InvoiceNumber: "HS1", InvoiceDate: "2026-08-03", Brutto: 120, Netto: 100, VATAmount: 20})
+	returnedID := add(t, db, Invoice{InvoiceNumber: "HS2", InvoiceDate: "2026-08-04", Brutto: 300, Netto: 250, VATAmount: 50})
+	if err := db.MarkReturned(returnedID); err != nil {
+		t.Fatalf("MarkReturned: %v", err)
+	}
+
+	m, err := db.ThisMonth(time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("this month: %v", err)
+	}
+	if m.Purchases != 120 {
+		t.Errorf("purchases = %v, want 120 (the returned £300 invoice must be excluded)", m.Purchases)
+	}
+	if m.Brutto != 420 {
+		t.Errorf("brutto (raw total) = %v, want 420 — it must NOT also exclude the returned invoice", m.Brutto)
 	}
 }
 
