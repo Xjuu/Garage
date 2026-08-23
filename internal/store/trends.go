@@ -147,6 +147,13 @@ func (s *Store) Spending(q TrendQuery) (*Trends, error) {
 		return nil, err
 	}
 	scope, scopeArgs := q.scopeClause()
+	// A returned invoice's money came back, and its credit note never was
+	// real spend either — the same exclusion Overview and This Month apply
+	// to Purchases, kept here too so this page never disagrees with those.
+	// Folded into scope itself so dailySeries and dailyDetail below, which
+	// both just take scope as a plain string, inherit it automatically
+	// rather than needing their own copy of the same clause.
+	scope += " AND i.returned = 0 AND i.credit_of IS NULL"
 
 	t := &Trends{
 		From: from, To: to, Days: days, Label: label,

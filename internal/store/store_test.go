@@ -282,6 +282,50 @@ func TestGeneralStockExcludedFromVehicleScope(t *testing.T) {
 	}
 }
 
+// The Spending page's day-by-day breakdown used to list a returned item
+// twice — once as the original purchase, once again as its credit note's
+// own negative-quantity line — with neither telling you it was a return.
+// Same exclusion Overview and This Month already apply to their own spend
+// totals: a returned invoice's headline trend figures and its individual
+// line items, on both sides of the return, are excluded here too.
+func TestSpendingExcludesReturnedInvoicesAndTheirCreditNotes(t *testing.T) {
+	db := open(t)
+	kept := add(t, db, Invoice{InvoiceNumber: "HS1", InvoiceDate: "2026-08-10",
+		VehicleReg: "AB12CDE", Brutto: 100, Netto: 80, VATAmount: 20,
+		Items: []Item{{PartNumber: "KEPT-1", Desc: "A part that stayed bought", Quantity: 1, Brutto: 100}}})
+	returnedID := add(t, db, Invoice{InvoiceNumber: "HS2", InvoiceDate: "2026-08-11",
+		VehicleReg: "AB12CDE", Brutto: 300, Netto: 250, VATAmount: 50,
+		Items: []Item{{PartNumber: "RETURNED-1", Desc: "The original purchase", Quantity: 1, Brutto: 300}}})
+	if err := db.MarkReturned(returnedID); err != nil {
+		t.Fatalf("MarkReturned: %v", err)
+	}
+	add(t, db, Invoice{InvoiceNumber: "HS2-CN", InvoiceDate: "2026-08-12",
+		VehicleReg: "AB12CDE", Brutto: -300, Netto: -250, VATAmount: -50, CreditOf: &returnedID,
+		Items: []Item{{PartNumber: "RETURNED-1", Desc: "The credit note's own line", Quantity: -1, Brutto: -300}}})
+	_ = kept
+
+	tr, err := db.Spending(TrendQuery{Period: "365d"})
+	if err != nil {
+		t.Fatalf("spending: %v", err)
+	}
+	if tr.Brutto != 100 {
+		t.Errorf("headline brutto = %v, want 100 (only the kept invoice)", tr.Brutto)
+	}
+	if tr.Invoices != 1 {
+		t.Errorf("headline invoice count = %d, want 1", tr.Invoices)
+	}
+
+	var parts []string
+	for _, day := range tr.Detail {
+		for _, line := range day.Lines {
+			parts = append(parts, line.PartNumber)
+		}
+	}
+	if len(parts) != 1 || parts[0] != "KEPT-1" {
+		t.Fatalf("day-by-day line items = %v, want exactly [KEPT-1] — neither side of the return should appear", parts)
+	}
+}
+
 // Credit notes are stored with negative totals. Netting them into a single
 // "spend" figure hides them; one large credit can make a month of real
 // purchasing show as a negative number that reads as a bug.
