@@ -24,6 +24,7 @@ import (
 	"goldstar/internal/config"
 	"goldstar/internal/extract"
 	"goldstar/internal/pipeline"
+	"goldstar/internal/repairsauth"
 	"goldstar/internal/store"
 	"goldstar/internal/web"
 )
@@ -48,6 +49,9 @@ Usage:
   goldstar eval      Re-extract every completed example and score the accuracy
   goldstar serve     Serve the dashboard (default 127.0.0.1:8787)
   goldstar passwd    Generate the dashboard password hash
+  goldstar repairs-pin-rehash  One-time migration: hashes data/repairs.pin in place
+                     if it still holds a PIN from before this was hashed at rest.
+                     Safe to run any time — a no-op once it's already hashed.
   goldstar totp-reset  Clear two-factor auth — the next login has to set it up again.
                      Use this if the device with the authenticator app is lost.
   goldstar doctor    Check configuration and connectivity without changing anything
@@ -100,6 +104,9 @@ func realMain(cmd string) error {
 		fmt.Println("Restart `goldstar serve` (or the systemd service) for this to take effect —")
 		fmt.Println("a running process keeps the old secret in memory until it reloads.")
 		return nil
+	}
+	if cmd == "repairs-pin-rehash" {
+		return repairsPinRehash(cfg)
 	}
 
 	if err := cfg.EnsureDirs(); err != nil {
@@ -252,6 +259,43 @@ func runExport(cfg *config.Config, db *store.Store) error {
 		return err
 	}
 	log.Printf("wrote %d invoice(s) to %s", n, path)
+	return nil
+}
+
+// repairsPinRehash migrates data/repairs.pin from the old plaintext format
+// (raw digits, from before the PIN was hashed at rest) to the hashed one, in
+// place — a one-time step for an install whose PIN was set before this
+// version. Idempotent and safe to run any number of times: an
+// already-hashed file, or no file at all (GOLDSTAR_REPAIRS_PIN-only setups
+// never had one), is left untouched either way. Never prints the PIN
+// itself, on success or failure.
+func repairsPinRehash(cfg *config.Config) error {
+	b, err := os.ReadFile(cfg.RepairsPINFilePath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No repairs.pin file on disk — nothing to migrate.")
+			return nil
+		}
+		return err
+	}
+	raw := strings.TrimSpace(string(b))
+	if raw == "" {
+		fmt.Println("repairs.pin is empty — nothing to migrate.")
+		return nil
+	}
+	if strings.HasPrefix(raw, "argon2id$") {
+		fmt.Println("repairs.pin is already hashed — nothing to do.")
+		return nil
+	}
+	hash, err := repairsauth.HashPIN(raw)
+	if err != nil {
+		return err
+	}
+	if err := cfg.WriteRepairsPIN(hash); err != nil {
+		return err
+	}
+	fmt.Println("repairs.pin has been rehashed in place.")
+	fmt.Println("A running `goldstar serve` already hashes it in memory on its own and needs no restart for this — the file just now matches what's already true in memory.")
 	return nil
 }
 
