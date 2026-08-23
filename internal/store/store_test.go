@@ -433,6 +433,61 @@ func TestConfusableSpellingsShareOneVehicle(t *testing.T) {
 	}
 }
 
+// Capabilities is a fleet-level classification (e.g. "F"), not something
+// any repair-visit spec update ever sets — there's no Go setter for it yet,
+// only a raw column a bulk import writes into directly, so this proves the
+// read side (GetVehicle and the registry list both) surfaces whatever is
+// actually in that column rather than silently dropping it.
+func TestVehicleCapabilitiesRoundTripsThroughGetAndRegistry(t *testing.T) {
+	db := open(t)
+	if err := db.SaveVehicle("FG21OXA", VehiclePatch{Make: ptr("Skoda"), Model: ptr("Octavia")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.db.Exec(`UPDATE vehicles SET capabilities = 'F' WHERE registration = 'FG21OXA'`); err != nil {
+		t.Fatalf("seed capabilities: %v", err)
+	}
+
+	v, err := db.GetVehicle("FG21OXA")
+	if err != nil {
+		t.Fatalf("GetVehicle: %v", err)
+	}
+	if v.Capabilities != "F" {
+		t.Fatalf("GetVehicle Capabilities = %q, want %q", v.Capabilities, "F")
+	}
+
+	rows, err := db.RegisteredVehicles(0)
+	if err != nil {
+		t.Fatalf("RegisteredVehicles: %v", err)
+	}
+	found := false
+	for _, r := range rows {
+		if r.Registration == "FG21OXA" {
+			found = true
+			if r.Capabilities != "F" {
+				t.Errorf("registry row Capabilities = %q, want %q", r.Capabilities, "F")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("FG21OXA not present in RegisteredVehicles at all")
+	}
+
+	// A vehicle nobody has tagged must read as empty, not some other
+	// placeholder — "no capabilities set" and "capabilities: (blank
+	// string)" have to be the same thing for the frontend's `if (!val)
+	// return ''` card-omission logic to work at all.
+	if err := db.SaveVehicle("DK18CXR", VehiclePatch{Make: ptr("SEAT")}); err != nil {
+		t.Fatal(err)
+	}
+	untagged, err := db.GetVehicle("DK18CXR")
+	if err != nil {
+		t.Fatalf("GetVehicle: %v", err)
+	}
+	if untagged.Capabilities != "" {
+		t.Fatalf("an untagged vehicle's Capabilities = %q, want empty", untagged.Capabilities)
+	}
+}
+
 // The callsign is the number the office uses on the radio, so it has to find
 // the car whether or not that car has ever been invoiced. It previously only
 // matched vehicles with no invoices — the least useful half.

@@ -159,6 +159,7 @@ function renderVehicleSpec(v, lastTimingBelt, hasTimingBelt) {
   // for a number worth noticing — everything else is plain reference info.
   $('veh-spec').innerHTML = [
     card('Last timing belt change', hasTimingBelt ? ukDate(lastTimingBelt) : '', { highlight: true, mono: true }),
+    card('Capabilities', v.capabilities),
     card('Colour', v.colour),
     card('Fuel type', v.fuel_type),
     card('Cylinder capacity', v.cylinder_capacity),

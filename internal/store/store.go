@@ -171,6 +171,11 @@ CREATE TABLE IF NOT EXISTS vehicles (
   tyre_size         TEXT NOT NULL DEFAULT '',
   radio_code        TEXT NOT NULL DEFAULT '',
   spare_keys        TEXT NOT NULL DEFAULT '',
+  -- Unlike the spec facts above, this isn't something a repair visit ever
+  -- fills in — it's a fleet-level classification set from the dashboard
+  -- (or a bulk import) for what the vehicle itself is licensed/equipped
+  -- for, e.g. "F".
+  capabilities      TEXT NOT NULL DEFAULT '',
   created_at        TEXT NOT NULL
 );
 
@@ -348,6 +353,7 @@ func migrate(db *sql.DB) error {
 			"tyre_size":         "ALTER TABLE vehicles ADD COLUMN tyre_size TEXT NOT NULL DEFAULT ''",
 			"radio_code":        "ALTER TABLE vehicles ADD COLUMN radio_code TEXT NOT NULL DEFAULT ''",
 			"spare_keys":        "ALTER TABLE vehicles ADD COLUMN spare_keys TEXT NOT NULL DEFAULT ''",
+			"capabilities":      "ALTER TABLE vehicles ADD COLUMN capabilities TEXT NOT NULL DEFAULT ''",
 		},
 		"repairs": {
 			"engine_number": "ALTER TABLE repairs ADD COLUMN engine_number TEXT NOT NULL DEFAULT ''",

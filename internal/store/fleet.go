@@ -206,6 +206,9 @@ type Vehicle struct {
 	TyreSize         string `json:"tyre_size"`
 	RadioCode        string `json:"radio_code"`
 	SpareKeys        string `json:"spare_keys"`
+	// Capabilities is a fleet-level classification, not a repair-visit spec
+	// fact — set from the dashboard or a bulk import, e.g. "F".
+	Capabilities string `json:"capabilities"`
 }
 
 const vehicleSelect = `
@@ -215,7 +218,7 @@ const vehicleSelect = `
 	       COALESCE(SUM(i.netto),0), COALESCE(SUM(i.vat_amount),0), COALESCE(SUM(i.brutto),0),
 	       COALESCE(MIN(NULLIF(i.invoice_date,'')),''), COALESCE(MAX(NULLIF(i.invoice_date,'')),''),
 	       v.vin, v.colour, v.cylinder_capacity, v.fuel_type, v.engine_size, v.engine_number, v.tyre_size,
-	       v.radio_code, v.spare_keys
+	       v.radio_code, v.spare_keys, v.capabilities
 	FROM vehicles v
 	LEFT JOIN companies c ON c.id = v.company_id
 	LEFT JOIN invoices i  ON i.vehicle_reg = v.registration`
@@ -228,7 +231,7 @@ func scanVehicle(sc scanner) (*Vehicle, error) {
 		&v.Year, &v.Driver, &v.Notes, &active, &v.Invoices,
 		&v.Netto, &v.VAT, &v.Brutto, &v.FirstSeen, &v.LastSeen,
 		&v.VIN, &v.Colour, &v.CylinderCapacity, &v.FuelType, &v.EngineSize, &v.EngineNumber, &v.TyreSize,
-		&v.RadioCode, &v.SpareKeys); err != nil {
+		&v.RadioCode, &v.SpareKeys, &v.Capabilities); err != nil {
 		return nil, err
 	}
 	if companyID.Valid {
