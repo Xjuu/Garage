@@ -105,15 +105,34 @@ async function loadVehicleDetail() {
   renderVehicleSpec(v, d.last_timing_belt, d.has_timing_belt);
 
   $('veh-repairs').innerHTML = (d.repairs || []).length
-    ? d.repairs.map((r) => `
+    ? d.repairs.map((r, i) => {
+        // A hover tooltip is the only way to read a truncated description
+        // right now, and that's no good at all for a glance, let alone on
+        // a touch screen — a real button gets the full text open on
+        // demand instead. Only offered when there's actually more to see:
+        // a short description that already fits gets no button to do
+        // nothing.
+        const long = (r.description || '').length > 40;
+        return `
         <tr class="${r.timing_belt_changed ? 'notable' : ''}">
           <td class="mono">${dash(r.service_date)}</td>
           <td class="strong">${esc(serviceTypeLabel(r))}</td>
           <td class="num">${r.mileage ? int(r.mileage) + ' mi' : '—'}</td>
           <td>${r.timing_belt_changed ? '<span class="pill">Timing belt</span>' : ''}</td>
-          <td class="truncate" title="${esc(r.description)}">${dash(r.description)}</td>
-        </tr>`).join('')
+          <td class="desc-cell" data-desc-row="${i}">
+            <span class="${long ? 'truncate' : ''}" title="${esc(r.description)}">${dash(r.description)}</span>
+            ${long ? `<button type="button" class="btn sm desc-toggle" data-desc-row="${i}">More</button>` : ''}
+          </td>
+        </tr>`;
+      }).join('')
     : '<tr><td colspan="5" class="empty">No repairs logged</td></tr>';
+  $('veh-repairs').querySelectorAll('.desc-toggle').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const cell = $('veh-repairs').querySelector(`.desc-cell[data-desc-row="${btn.dataset.descRow}"]`);
+      const expanded = cell.classList.toggle('expanded');
+      cell.querySelector('span').classList.toggle('truncate', !expanded);
+      btn.textContent = expanded ? 'Less' : 'More';
+    }));
 
   // An offer, not an automatic jump: opening a vehicle used to silently
   // carry no filter over to Invoices at all — filterByVehicle already
