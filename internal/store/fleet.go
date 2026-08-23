@@ -347,6 +347,35 @@ func (s *Store) DeleteVehicle(reg string) error {
 	return err
 }
 
+// SetVehicleCapabilities assigns the fleet-level capability code to reg —
+// deliberately its own tiny setter, not folded into SaveVehicle's upsert:
+// that one requires every identity field on every call (it isn't a true
+// partial patch — an omitted make/company_id gets overwritten to blank or
+// the default, not left alone), so reusing it here to change just one
+// field would risk silently wiping a vehicle's driver, company or name.
+// Registers the vehicle first if this is a plate with no registry row at
+// all yet, same as a repair visit's own spec update does, so this works
+// for a genuinely new car too, not only ones already on file.
+func (s *Store) SetVehicleCapabilities(reg, capabilities string) error {
+	reg = NormalizeReg(reg)
+	if reg == "" {
+		return fmt.Errorf("registration is required")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := ensureVehicleRegistered(tx, reg); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE vehicles SET capabilities = ? WHERE registration = ?`,
+		strings.TrimSpace(capabilities), reg); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ensureVehicleRegistered gives a plate seen on an invoice a registry row the
 // moment it is first stored, landing it in the default company (Overall
 // Clients) rather than leaving it to sit uncounted until someone notices it

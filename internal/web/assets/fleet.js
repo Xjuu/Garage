@@ -173,12 +173,29 @@ function renderVehicleSpec(v, lastTimingBelt, hasTimingBelt) {
     return `<div class="${cls}"><div class="k">${esc(k)}</div><div class="${vcls}">${esc(val)}</div></div>`;
   };
 
+  // The one editable card in an otherwise entirely read-only grid — every
+  // other fact here only ever arrives from a repair visit logged on
+  // repairs.<domain>. A fleet-level classification like "FGTY68" has
+  // nowhere else to be assigned from, so it gets its own input and Save
+  // button here instead of card()'s plain template, and — unlike every
+  // other card — is shown even with nothing on file yet, since leaving no
+  // capability blank is a real choice too, not just "nothing to show".
+  const capabilitiesCard = `
+    <div class="spec-card">
+      <div class="k">Capabilities</div>
+      <div class="spec-edit">
+        <input type="text" id="veh-capabilities-input" value="${esc(v.capabilities)}"
+               placeholder="e.g. FGTY68" autocomplete="off">
+        <button class="btn sm" id="veh-capabilities-save" type="button">Save</button>
+      </div>
+    </div>`;
+
   // The one fact with a real maintenance interval behind it leads the
   // grid, set apart with the same ink-border treatment .tile.alert uses
   // for a number worth noticing — everything else is plain reference info.
   $('veh-spec').innerHTML = [
     card('Last timing belt change', hasTimingBelt ? ukDate(lastTimingBelt) : '', { highlight: true, mono: true }),
-    card('Capabilities', v.capabilities),
+    capabilitiesCard,
     card('Colour', v.colour),
     card('Fuel type', v.fuel_type),
     card('Cylinder capacity', v.cylinder_capacity),
@@ -190,6 +207,29 @@ function renderVehicleSpec(v, lastTimingBelt, hasTimingBelt) {
     card('Radio code', v.radio_code, { mono: true }),
   ].join('');
   $('veh-spec-section').hidden = !$('veh-spec').innerHTML;
+
+  const saveCapabilities = async () => {
+    const input = $('veh-capabilities-input');
+    const btn = $('veh-capabilities-save');
+    const value = input.value.trim().toUpperCase();
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      await api('/api/registry/' + encodeURIComponent(v.registration) + '/capabilities', {
+        method: 'PATCH', json: { capabilities: value },
+      });
+      input.value = value;
+      toast(`Capabilities updated for ${v.registration}`);
+    } catch (e) {
+      toast(e.message, true);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  };
+  $('veh-capabilities-save').addEventListener('click', saveCapabilities);
+  $('veh-capabilities-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveCapabilities(); }
+  });
 }
 
 // ── part detail ───────────────────────────────────────────────────────────

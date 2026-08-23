@@ -586,6 +586,86 @@ func TestVehicleCapabilitiesRoundTripsThroughGetAndRegistry(t *testing.T) {
 	}
 }
 
+// SetVehicleCapabilities is deliberately its own tiny setter rather than
+// going through SaveVehicle's full upsert — this pins down the reason why:
+// a call that only ever mentions capabilities must leave every other field
+// on an existing vehicle completely untouched.
+func TestSetVehicleCapabilitiesLeavesOtherFieldsAlone(t *testing.T) {
+	db := open(t)
+	id, err := db.AddCompany("Acme Cars")
+	if err != nil {
+		t.Fatalf("AddCompany: %v", err)
+	}
+	if err := db.SaveVehicle("FG21OXA", VehiclePatch{
+		Make: ptr("Skoda"), Model: ptr("Octavia"), Driver: ptr("Alex"), CompanyID: &id,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.SetVehicleCapabilities("FG21OXA", "FGTY68"); err != nil {
+		t.Fatalf("SetVehicleCapabilities: %v", err)
+	}
+
+	v, err := db.GetVehicle("FG21OXA")
+	if err != nil {
+		t.Fatalf("GetVehicle: %v", err)
+	}
+	if v.Capabilities != "FGTY68" {
+		t.Errorf("Capabilities = %q, want %q", v.Capabilities, "FGTY68")
+	}
+	if v.Make != "Skoda" || v.Model != "Octavia" || v.Driver != "Alex" {
+		t.Errorf("other fields changed: make=%q model=%q driver=%q, want Skoda/Octavia/Alex",
+			v.Make, v.Model, v.Driver)
+	}
+	if v.CompanyID == nil || *v.CompanyID != id {
+		t.Errorf("company assignment changed: %v, want %d", v.CompanyID, id)
+	}
+}
+
+// A capability can be assigned to a plate that has no registry row at all
+// yet — the same "register it first" behaviour a repair visit's own spec
+// update already has, so this works for a genuinely new car too.
+func TestSetVehicleCapabilitiesRegistersAnUnknownVehicle(t *testing.T) {
+	db := open(t)
+	if err := db.SetVehicleCapabilities("ZZ99ZZZ", "F"); err != nil {
+		t.Fatalf("SetVehicleCapabilities: %v", err)
+	}
+	v, err := db.GetVehicle("ZZ99ZZZ")
+	if err != nil {
+		t.Fatalf("GetVehicle: %v", err)
+	}
+	if v.Capabilities != "F" {
+		t.Errorf("Capabilities = %q, want %q", v.Capabilities, "F")
+	}
+}
+
+// Blank clears it, and stray whitespace around a real value is trimmed —
+// the same tidiness any other free-text field on this registry gets.
+func TestSetVehicleCapabilitiesTrimsAndCanClear(t *testing.T) {
+	db := open(t)
+	if err := db.SetVehicleCapabilities("FG21OXA", "  FGTY68  "); err != nil {
+		t.Fatalf("SetVehicleCapabilities: %v", err)
+	}
+	v, err := db.GetVehicle("FG21OXA")
+	if err != nil {
+		t.Fatalf("GetVehicle: %v", err)
+	}
+	if v.Capabilities != "FGTY68" {
+		t.Errorf("Capabilities = %q, want trimmed %q", v.Capabilities, "FGTY68")
+	}
+
+	if err := db.SetVehicleCapabilities("FG21OXA", ""); err != nil {
+		t.Fatalf("SetVehicleCapabilities (clear): %v", err)
+	}
+	v, err = db.GetVehicle("FG21OXA")
+	if err != nil {
+		t.Fatalf("GetVehicle: %v", err)
+	}
+	if v.Capabilities != "" {
+		t.Errorf("Capabilities after clearing = %q, want empty", v.Capabilities)
+	}
+}
+
 // The callsign is the number the office uses on the radio, so it has to find
 // the car whether or not that car has ever been invoiced. It previously only
 // matched vehicles with no invoices — the least useful half.

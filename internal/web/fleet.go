@@ -21,6 +21,7 @@ func (s *Server) routesFleet(api *http.ServeMux) {
 	api.HandleFunc("GET /api/registry/unassigned", s.json(s.unassigned))
 	api.HandleFunc("PUT /api/registry/{reg}", s.json(s.saveVehicle))
 	api.HandleFunc("DELETE /api/registry/{reg}", s.json(s.deleteVehicle))
+	api.HandleFunc("PATCH /api/registry/{reg}/capabilities", s.json(s.setVehicleCapabilities))
 
 	api.HandleFunc("GET /api/vehicle/{reg}", s.json(s.vehicleStats))
 	api.HandleFunc("GET /api/part/{part}", s.json(s.partStats))
@@ -94,6 +95,23 @@ func (s *Server) saveVehicle(r *http.Request) (any, error) {
 func (s *Server) deleteVehicle(r *http.Request) (any, error) {
 	if err := s.db.DeleteVehicle(r.PathValue("reg")); err != nil {
 		return nil, err
+	}
+	return okResponse(), nil
+}
+
+// setVehicleCapabilities is deliberately its own small endpoint rather than
+// reusing PUT /api/registry/{reg} — see store.SetVehicleCapabilities' own
+// comment for why folding this into the general upsert would risk wiping
+// other fields.
+func (s *Server) setVehicleCapabilities(r *http.Request) (any, error) {
+	var body struct {
+		Capabilities string `json:"capabilities"`
+	}
+	if err := decode(r, &body); err != nil {
+		return nil, err
+	}
+	if err := s.db.SetVehicleCapabilities(r.PathValue("reg"), body.Capabilities); err != nil {
+		return nil, fail(http.StatusBadRequest, "%v", err)
 	}
 	return okResponse(), nil
 }

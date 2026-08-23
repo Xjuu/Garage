@@ -53,7 +53,14 @@ function el(id) {
 
 const store = {};
 ids.forEach((i) => { store[i] = el(i); });
-['c-invoices', 'c-vehicles', 'c-parts', 'c-suppliers', 'c-training', 'c-exports']
+// veh-capabilities-input/-save aren't in index.html — renderVehicleSpec
+// builds them itself as an HTML string and wires listeners onto whatever
+// getElementById finds afterwards, which only a real DOM materializes from
+// that string. loadVehicleDetail() calls renderVehicleSpec on its way to
+// the action toast this check is actually about, so it just needs
+// renderVehicleSpec not to throw reaching for them.
+['c-invoices', 'c-vehicles', 'c-parts', 'c-suppliers', 'c-training', 'c-exports',
+  'veh-capabilities-input', 'veh-capabilities-save']
   .forEach((i) => { store[i] ??= el(i); });
 
 // Real elements, not the generic stub: actionToast() actually builds its

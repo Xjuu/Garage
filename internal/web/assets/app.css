@@ -260,6 +260,14 @@ input::placeholder { color: var(--g4); }
    from the purely informational cards around it, the same way .pc-picked
    once marked "the settled, important choice" with an ink border. */
 .spec-card.highlight { border-color: var(--ink); background: var(--g05); }
+/* The one editable card in the grid: input and Save button sit on one row,
+   the input taking whatever room the button doesn't need. */
+.spec-edit { display: flex; gap: 6px; margin-top: 3px; }
+.spec-edit input {
+  padding: 5px 8px; font-size: 13px; font-weight: 700;
+  font-family: var(--mono); text-transform: uppercase;
+}
+.spec-edit .btn { flex: none; }
 
 /* ── Tables ─────────────────────────────────────────────────────────── */
 
