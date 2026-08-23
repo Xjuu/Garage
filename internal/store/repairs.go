@@ -310,42 +310,6 @@ func updateVehicleSpecTx(tx *sql.Tx, reg string, p VehicleSpecPatch) error {
 	return err
 }
 
-// OverwriteVehicleSpec replaces every spec field with exactly what's given,
-// including deliberately blanking one out — unlike UpdateVehicleSpec's
-// partial-update semantics (used when a repair visit only mentions some
-// fields and must never erase what an earlier visit already recorded),
-// this backs the "correct this vehicle's record" upload tool, where the
-// operator is looking straight at the current values and a field they
-// clear is a conscious choice, not an accidental gap.
-func (s *Store) OverwriteVehicleSpec(reg string, p VehicleSpecPatch) error {
-	reg = NormalizeReg(reg)
-	if reg == "" {
-		return fmt.Errorf("registration is required")
-	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := ensureVehicleRegistered(tx, reg); err != nil {
-		return err
-	}
-	_, err = tx.Exec(`
-		UPDATE vehicles SET
-			make = ?, model = ?, vin = ?, colour = ?, cylinder_capacity = ?,
-			fuel_type = ?, engine_size = ?, engine_number = ?, tyre_size = ?,
-			radio_code = ?, spare_keys = ?
-		WHERE registration = ?`,
-		strings.TrimSpace(p.Make), strings.TrimSpace(p.Model), strings.TrimSpace(p.VIN),
-		strings.TrimSpace(p.Colour), strings.TrimSpace(p.CylinderCapacity), strings.TrimSpace(p.FuelType),
-		strings.TrimSpace(p.EngineSize), strings.TrimSpace(p.EngineNumber), strings.TrimSpace(p.TyreSize),
-		strings.TrimSpace(p.RadioCode), strings.TrimSpace(p.SpareKeys), reg)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // ── devices ──────────────────────────────────────────────────────────────
 
 type RepairsDevice struct {

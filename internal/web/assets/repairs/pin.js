@@ -18,10 +18,9 @@ async function trySubmit(code) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'incorrect code');
-    // Reloading, not a hardcoded redirect to "/": this same page is also
-    // shown for /upload when a device isn't signed in yet, and the server
-    // decides which real page to serve for whatever URL is already in the
-    // address bar once the device cookie proves it's authenticated.
+    // Reloading, not a hardcoded redirect to "/": the server decides which
+    // real page to serve for whatever URL is already in the address bar
+    // once the device cookie proves it's authenticated.
     location.reload();
   } catch (e) {
     err.textContent = e.message;

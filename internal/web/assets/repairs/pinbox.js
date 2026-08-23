@@ -13,9 +13,9 @@
    it behaves like any ordinary text field, and native backspace and paste
    both work for free instead of needing their own handlers.
 
-   Shared by the sign-in screen and the bulk-upload tool's re-verify
-   prompt. Returns { clear(), code() } so the caller can wipe the field
-   after a wrong code and read the current value if needed. */
+   Used by the sign-in screen. Returns { clear(), code() } so the caller
+   can wipe the field after a wrong code and read the current value if
+   needed. */
 function setupPinBoxes(containerId, onComplete) {
   const container = document.getElementById(containerId);
   const boxes = Array.from(container.querySelectorAll('.pin-box'));
@@ -34,13 +34,12 @@ function setupPinBoxes(containerId, onComplete) {
     return hidden.value;
   }
   // Deferred a frame: calling .focus() in the same synchronous tick that
-  // just unhid the field's own container (see the upload page's re-verify
-  // overlay, which starts out hidden and appears on demand) is a known
-  // cross-browser flake — the browser hasn't necessarily finished laying
-  // the element out yet, and focus() on something not yet paintable is
-  // quietly a no-op. The sign-in page's field is visible from first paint,
-  // so this never mattered there; it matters a great deal the moment a
-  // field starts hidden and is shown later.
+  // just unhid an element's container is a known cross-browser flake — the
+  // browser hasn't necessarily finished laying the element out yet, and
+  // focus() on something not yet paintable is quietly a no-op. The sign-in
+  // page's field is visible from first paint, so this doesn't actually bite
+  // today, but costs nothing and keeps this safe for any caller that does
+  // start hidden.
   function focus() {
     requestAnimationFrame(() => hidden.focus());
   }

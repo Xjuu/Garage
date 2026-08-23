@@ -3,9 +3,7 @@
  * reported as "doesn't jump to the next box and doesn't log in at all",
  * which is what prompted rebuilding pinbox.js around one real input
  * instead of six separately-focused ones; this harness is the regression
- * test for that page specifically, not just the widget in isolation
- * (already covered from the upload page's re-verify prompt in
- * repairs-upload-check.cjs).
+ * test for that page specifically, not just the widget in isolation.
  *
  * Usage: node tools/repairs-pin-check.cjs
  * Exits non-zero if any check fails or a loaded script throws.

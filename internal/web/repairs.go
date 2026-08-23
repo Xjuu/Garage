@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"goldstar/internal/store"
 )
@@ -22,7 +21,6 @@ func (s *Server) repairsRoutes(sub fs.FS) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.StripPrefix("/static/", staticHandler(sub)))
 	mux.HandleFunc("GET /{$}", s.handleRepairsRoot)
-	mux.HandleFunc("GET /upload", s.handleRepairsUploadPage)
 	mux.HandleFunc("POST /api/repairs/login", s.handleRepairsLogin)
 	mux.HandleFunc("POST /api/repairs/logout", s.handleRepairsLogout)
 	mux.HandleFunc("GET /api/repairs/session", s.handleRepairsSession)
@@ -32,17 +30,11 @@ func (s *Server) repairsRoutes(sub fs.FS) http.Handler {
 	device.HandleFunc("GET /api/repairs/reg-exists", s.json(s.repairsRegExists))
 	device.HandleFunc("GET /api/repairs/history", s.json(s.repairsHistory))
 	device.HandleFunc("POST /api/repairs/log", s.json(s.repairsLogEntry))
-	// The read is no more sensitive than search/history above — reading a
-	// vehicle's current spec carries none of the risk of changing it, so it
-	// sits behind the normal device gate only, not the upload throttle.
-	device.HandleFunc("GET /api/repairs/upload/vehicle", s.json(s.repairsUploadGetVehicle))
-	device.HandleFunc("POST /api/repairs/upload/vehicle", s.json(s.repairsUploadSaveVehicle))
 	protected := s.requireRepairsDevice(device)
 	mux.Handle("/api/repairs/search-vehicles", protected)
 	mux.Handle("/api/repairs/reg-exists", protected)
 	mux.Handle("/api/repairs/history", protected)
 	mux.Handle("/api/repairs/log", protected)
-	mux.Handle("/api/repairs/upload/vehicle", protected)
 
 	return mux
 }
@@ -103,19 +95,6 @@ func (s *Server) handleRepairsRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.serveRepairsPage(w, r, "assets/repairs/index.html")
-}
-
-// handleRepairsUploadPage is the bulk vehicle-data correction tool — a
-// second page on the same site, gated by the exact same device login as
-// everything else here (the upload throttle is a second, separate gate
-// checked only when an actual update is submitted, not just to look at
-// the page).
-func (s *Server) handleRepairsUploadPage(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/upload" {
-		http.NotFound(w, r)
-		return
-	}
-	s.serveRepairsPage(w, r, "assets/repairs/upload.html")
 }
 
 // serveRepairsPage shows realPage once the device is authenticated, or the
@@ -191,9 +170,9 @@ func (s *Server) repairsSearchVehicles(r *http.Request) (any, error) {
 }
 
 // repairsRegExists backs the "add this as a new registration?" prompt —
-// both the main log page and /upload check before treating a typed
-// registration that matched nothing as fair game, so a typo doesn't
-// silently start a second history for a car that already has one.
+// checked before treating a typed registration that matched nothing as
+// fair game, so a typo doesn't silently start a second history for a car
+// that already has one.
 func (s *Server) repairsRegExists(r *http.Request) (any, error) {
 	reg := r.URL.Query().Get("reg")
 	if reg == "" {
@@ -228,76 +207,4 @@ func (s *Server) repairsLogEntry(r *http.Request) (any, error) {
 		return nil, fail(http.StatusBadRequest, "%v", err)
 	}
 	return map[string]any{"ok": true, "id": id}, nil
-}
-
-// ── bulk vehicle-data upload ─────────────────────────────────────────────
-
-// vehicleSpecView is the small, upload-tool-scoped read of a vehicle's
-// current record — not the full store.Vehicle, which also carries spend
-// figures, company assignment and invoice counts that have nothing to do
-// with correcting a VIN or a tyre size from a workshop tablet.
-type vehicleSpecView struct {
-	Registration     string `json:"registration"`
-	VIN              string `json:"vin"`
-	Make             string `json:"make"`
-	Model            string `json:"model"`
-	Colour           string `json:"colour"`
-	CylinderCapacity string `json:"cylinder_capacity"`
-	SpareKeys        string `json:"spare_keys"`
-	FuelType         string `json:"fuel_type"`
-	EngineSize       string `json:"engine_size"`
-	EngineNumber     string `json:"engine_number"`
-	TyreSize         string `json:"tyre_size"`
-	RadioCode        string `json:"radio_code"`
-}
-
-func (s *Server) repairsUploadGetVehicle(r *http.Request) (any, error) {
-	reg := r.URL.Query().Get("reg")
-	if reg == "" {
-		return nil, fail(http.StatusBadRequest, "reg is required")
-	}
-	v, err := s.db.GetVehicle(reg)
-	if err != nil {
-		// Nothing on file yet is not an error here — a brand-new
-		// registration just gets a blank form ready to fill in, the same
-		// as the main repairs page does for a car with no history.
-		return vehicleSpecView{Registration: strings.ToUpper(strings.TrimSpace(reg))}, nil
-	}
-	return vehicleSpecView{
-		Registration: v.Registration, VIN: v.VIN, Make: v.Make, Model: v.Model, Colour: v.Colour,
-		CylinderCapacity: v.CylinderCapacity, SpareKeys: v.SpareKeys, FuelType: v.FuelType,
-		EngineSize: v.EngineSize, EngineNumber: v.EngineNumber, TyreSize: v.TyreSize, RadioCode: v.RadioCode,
-	}, nil
-}
-
-// repairsUploadSaveVehicle overwrites a vehicle's spec fields outright —
-// see store.OverwriteVehicleSpec.
-func (s *Server) repairsUploadSaveVehicle(r *http.Request) (any, error) {
-	var body struct {
-		VehicleReg       string `json:"vehicle_reg"`
-		VIN              string `json:"vin"`
-		Make             string `json:"make"`
-		Model            string `json:"model"`
-		Colour           string `json:"colour"`
-		CylinderCapacity string `json:"cylinder_capacity"`
-		SpareKeys        string `json:"spare_keys"`
-		FuelType         string `json:"fuel_type"`
-		EngineSize       string `json:"engine_size"`
-		EngineNumber     string `json:"engine_number"`
-		TyreSize         string `json:"tyre_size"`
-		RadioCode        string `json:"radio_code"`
-	}
-	if err := decode(r, &body); err != nil {
-		return nil, err
-	}
-
-	if err := s.db.OverwriteVehicleSpec(body.VehicleReg, store.VehicleSpecPatch{
-		Make: body.Make, Model: body.Model, VIN: body.VIN, Colour: body.Colour,
-		CylinderCapacity: body.CylinderCapacity, FuelType: body.FuelType,
-		EngineSize: body.EngineSize, EngineNumber: body.EngineNumber,
-		TyreSize: body.TyreSize, RadioCode: body.RadioCode, SpareKeys: body.SpareKeys,
-	}); err != nil {
-		return nil, fail(http.StatusBadRequest, "%v", err)
-	}
-	return okResponse(), nil
 }

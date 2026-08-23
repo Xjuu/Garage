@@ -269,44 +269,6 @@ func TestRecentRepairsIncludesDeviceLabel(t *testing.T) {
 	}
 }
 
-// ── vehicle spec overwrite ───────────────────────────────────────────────
-
-// OverwriteVehicleSpec is the "correct this vehicle's record" tool behind
-// /upload — unlike the partial update a repair visit applies, it must be
-// able to deliberately blank a field back out, not just add or change one.
-func TestOverwriteVehicleSpecCanBlankAField(t *testing.T) {
-	db := open(t)
-	if err := db.UpdateVehicleSpec("AB12CDE", VehicleSpecPatch{Colour: "Silver", VIN: "OLDVIN123"}); err != nil {
-		t.Fatalf("UpdateVehicleSpec: %v", err)
-	}
-	v, err := db.GetVehicle("AB12CDE")
-	if err != nil || v.Colour != "Silver" || v.VIN != "OLDVIN123" {
-		t.Fatalf("seed state: %v %+v", err, v)
-	}
-
-	// Overwrite with a corrected VIN and a deliberately blanked colour.
-	if err := db.OverwriteVehicleSpec("AB12CDE", VehicleSpecPatch{Colour: "", VIN: "CORRECTED456"}); err != nil {
-		t.Fatalf("OverwriteVehicleSpec: %v", err)
-	}
-	v, err = db.GetVehicle("AB12CDE")
-	if err != nil {
-		t.Fatalf("GetVehicle: %v", err)
-	}
-	if v.VIN != "CORRECTED456" {
-		t.Fatalf("VIN = %q, want the corrected value", v.VIN)
-	}
-	if v.Colour != "" {
-		t.Fatalf("Colour = %q, want it cleared — OverwriteVehicleSpec must be able to blank a field, unlike UpdateVehicleSpec", v.Colour)
-	}
-}
-
-func TestOverwriteVehicleSpecRejectsEmptyRegistration(t *testing.T) {
-	db := open(t)
-	if err := db.OverwriteVehicleSpec("", VehicleSpecPatch{Colour: "Silver"}); err == nil {
-		t.Fatalf("expected an empty registration to be rejected")
-	}
-}
-
 // ── reg existence (the "add as a new registration?" gate) ───────────────
 
 func TestRegExistsIsFalseForATrulyUnknownPlate(t *testing.T) {
