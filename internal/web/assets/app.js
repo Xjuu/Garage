@@ -131,7 +131,15 @@ function queryString(extra = {}) {
 /* Navigation is two levels. Eleven top-level tabs meant the everyday pages —
    invoices, a car's costs — sat in the same undifferentiated row as things you
    touch once a month, like Training. Grouping puts five choices in the top row
-   and hides the rest until they are relevant. */
+   and hides the rest until they are relevant.
+
+   The server stamps the signed-in account's role onto <body data-role> when
+   it serves this page (see handleRoot) — a "fleet" account only ever reaches
+   the Fleet registry from here, not Training or Admin. This is the nav
+   convenience; the actual access control is requireAdmin on the API routes
+   themselves, since hiding a tab stops nothing on its own. */
+const role = document.body.dataset.role || 'admin';
+
 const GROUPS = [
   { id: 'overview', label: 'Overview', views: [['overview', 'Overview']] },
   { id: 'invoices', label: 'Invoices', count: 'c-invoices', views: [['invoices', 'Invoices']] },
@@ -145,14 +153,18 @@ const GROUPS = [
       ['vat', 'VAT'],
     ],
   },
-  {
-    id: 'setup', label: 'Setup',
-    views: [
-      ['fleet', 'Fleet'],
-      ['training', 'Training', 'c-training'],
-      ['admin', 'Admin'],
-    ],
-  },
+  role === 'admin'
+    ? {
+        id: 'setup', label: 'Setup',
+        views: [
+          ['fleet', 'Fleet'],
+          ['training', 'Training', 'c-training'],
+          ['admin', 'Admin'],
+        ],
+      }
+    // A single-view group renders as one direct tab, no dropdown — buildNav
+    // only shows subtabs for a group with more than one view.
+    : { id: 'setup', label: 'Fleet', views: [['fleet', 'Fleet']] },
 ];
 
 // Detail pages are reached by clicking a row, not from the nav, but they still

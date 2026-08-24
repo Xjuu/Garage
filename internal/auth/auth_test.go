@@ -6,19 +6,83 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"goldstar/internal/store"
 )
 
-func newTestAuth(t *testing.T, password string) *Auth {
+// fakeUsers is a tiny in-memory stand-in for *store.Store, satisfying the
+// users interface without a real database — fast, and keeps this package's
+// tests independent of internal/store's own test suite.
+type fakeUsers struct {
+	byID map[int64]*store.User
+	next int64
+}
+
+func newFakeUsers() *fakeUsers { return &fakeUsers{byID: map[int64]*store.User{}} }
+
+// addUser is the test-only convenience constructor: hashes password the same
+// way a real signup would, and returns the row so a test can inspect or
+// mutate it afterward (e.g. flipping MustChangePassword).
+func (f *fakeUsers) addUser(t *testing.T, username, password, role string) *store.User {
 	t.Helper()
 	hash, err := HashPassword(password)
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
 	}
-	a, err := New(hash, filepath.Join(t.TempDir(), "session.key"), false)
+	f.next++
+	u := &store.User{ID: f.next, Username: username, Role: role, PasswordHash: hash}
+	f.byID[u.ID] = u
+	return u
+}
+
+func (f *fakeUsers) GetUserByIdentity(who string) (*store.User, error) {
+	for _, u := range f.byID {
+		if u.Username == who || (u.Email != "" && u.Email == who) {
+			return u, nil
+		}
+	}
+	return nil, store.ErrUserNotFound
+}
+
+func (f *fakeUsers) GetUserByID(id int64) (*store.User, error) {
+	if u, ok := f.byID[id]; ok {
+		return u, nil
+	}
+	return nil, store.ErrUserNotFound
+}
+
+func (f *fakeUsers) SetUserPasswordHash(id int64, hash string) error {
+	u, ok := f.byID[id]
+	if !ok {
+		return store.ErrUserNotFound
+	}
+	u.PasswordHash = hash
+	u.MustChangePassword = false
+	return nil
+}
+
+func (f *fakeUsers) SetUserTOTPSecret(id int64, secret string) error {
+	u, ok := f.byID[id]
+	if !ok {
+		return store.ErrUserNotFound
+	}
+	u.TOTPSecret = secret
+	return nil
+}
+
+func (f *fakeUsers) UserCount() (int, error) { return len(f.byID), nil }
+
+// newTestAuth builds an Auth backed by a single admin account named "alice"
+// with the given password — the common case most tests below need.
+func newTestAuth(t *testing.T, password string) (*Auth, *fakeUsers, *store.User) {
+	t.Helper()
+	users := newFakeUsers()
+	u := users.addUser(t, "alice", password, store.RoleAdmin)
+	a, err := New(users, filepath.Join(t.TempDir(), "session.key"), false)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return a
+	return a, users, u
 }
 
 // cookieFrom pulls a named cookie's value out of a recorded response, or
@@ -55,14 +119,14 @@ func reqWithCookie(name, value string) *http.Request {
 // a session, whether or not this account has finished 2FA setup yet.
 func TestLoginNeverIssuesASessionDirectly(t *testing.T) {
 	for _, totpConfigured := range []bool{false, true} {
-		a := newTestAuth(t, "correct horse battery staple")
+		a, _, u := newTestAuth(t, "correct horse battery staple")
 		if totpConfigured {
-			a.SetTOTPSecret("JBSWY3DPEHPK3PXP")
+			u.TOTPSecret = "JBSWY3DPEHPK3PXP"
 		}
 
 		rec := httptest.NewRecorder()
 		stage, err := a.Login(rec, httptest.NewRequest(http.MethodPost, "/api/login", nil),
-			"", "correct horse battery staple")
+			"alice", "correct horse battery staple")
 		if err != nil {
 			t.Fatalf("Login: %v", err)
 		}
@@ -91,14 +155,14 @@ func TestLoginNeverIssuesASessionDirectly(t *testing.T) {
 
 // This is the property the "purpose" tag inside mint/valid exists for:
 // without it, a pending token and a session token are byte-for-byte the same
-// shape (expiry + HMAC), so whoever captures the pending cookie mid-login
-// could just resend it under the session cookie's name and skip the second
-// factor entirely.
+// shape (userID + expiry + HMAC), so whoever captures the pending cookie
+// mid-login could just resend it under the session cookie's name and skip
+// the second factor entirely.
 func TestPendingCookieCannotBeReplayedAsASession(t *testing.T) {
-	a := newTestAuth(t, "correct horse battery staple")
+	a, _, _ := newTestAuth(t, "correct horse battery staple")
 	rec := httptest.NewRecorder()
 	if _, err := a.Login(rec, httptest.NewRequest(http.MethodPost, "/", nil),
-		"", "correct horse battery staple"); err != nil {
+		"alice", "correct horse battery staple"); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
 	pending := cookieFrom(t, rec, pendingCookie)
@@ -110,20 +174,20 @@ func TestPendingCookieCannotBeReplayedAsASession(t *testing.T) {
 
 	// The reverse must hold too: a real session token must not pass as a
 	// pending one.
-	a2 := newTestAuth(t, "correct horse battery staple")
-	a2.SetTOTPSecret("JBSWY3DPEHPK3PXP")
+	a2, _, u2 := newTestAuth(t, "correct horse battery staple")
+	u2.TOTPSecret = "JBSWY3DPEHPK3PXP"
 	sessRec := httptest.NewRecorder()
-	a2.IssueSession(sessRec)
+	a2.IssueSession(sessRec, u2.ID)
 	session := cookieFrom(t, sessRec, sessionCookie)
-	if a2.PendingOK(reqWithCookie(pendingCookie, session)) {
+	if _, ok := a2.PendingUser(reqWithCookie(pendingCookie, session)); ok {
 		t.Fatalf("session cookie value accepted as a pending cookie")
 	}
 }
 
 func TestLoginRejectsWrongPassword(t *testing.T) {
-	a := newTestAuth(t, "correct horse battery staple")
+	a, _, _ := newTestAuth(t, "correct horse battery staple")
 	rec := httptest.NewRecorder()
-	_, err := a.Login(rec, httptest.NewRequest(http.MethodPost, "/", nil), "", "wrong password")
+	_, err := a.Login(rec, httptest.NewRequest(http.MethodPost, "/", nil), "alice", "wrong password")
 	if err == nil {
 		t.Fatalf("want an error for a wrong password")
 	}
@@ -132,23 +196,40 @@ func TestLoginRejectsWrongPassword(t *testing.T) {
 	}
 }
 
+// A username that doesn't exist at all must fail exactly like a wrong
+// password — reporting anything more specific would let a login attempt
+// enumerate which accounts exist.
+func TestLoginRejectsUnknownUsername(t *testing.T) {
+	a, _, _ := newTestAuth(t, "correct horse battery staple")
+	rec := httptest.NewRecorder()
+	_, err := a.Login(rec, httptest.NewRequest(http.MethodPost, "/", nil), "nobody", "correct horse battery staple")
+	if err == nil {
+		t.Fatalf("want an error for an unknown username")
+	}
+	if hasCookie(rec, pendingCookie) || hasCookie(rec, sessionCookie) {
+		t.Fatalf("a failed login must not set any cookie")
+	}
+}
+
 // Setting up 2FA for the first time: BeginTOTPSetup hands out a secret,
 // ConfirmTOTPSetup only accepts the matching code, and success is what
-// finally issues a real session.
+// finally issues a real session for the right account.
 func TestTOTPSetupFlow(t *testing.T) {
-	a := newTestAuth(t, "correct horse battery staple")
+	a, _, u := newTestAuth(t, "correct horse battery staple")
 	loginRec := httptest.NewRecorder()
 	if _, err := a.Login(loginRec, httptest.NewRequest(http.MethodPost, "/", nil),
-		"", "correct horse battery staple"); err != nil {
+		"alice", "correct horse battery staple"); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
+	pending := cookieFrom(t, loginRec, pendingCookie)
+	reqFor := func() *http.Request { return reqWithCookie(pendingCookie, pending) }
 
-	secret, err := a.BeginTOTPSetup()
+	secret, err := a.BeginTOTPSetup(reqFor())
 	if err != nil {
 		t.Fatalf("BeginTOTPSetup: %v", err)
 	}
-	if a.TOTPConfigured() {
-		t.Fatalf("TOTPConfigured must stay false until the setup code is confirmed")
+	if u.TOTPSecret != "" {
+		t.Fatalf("the account's TOTPSecret must stay empty until the setup code is confirmed")
 	}
 
 	code, err := hotp(secret, totpStep(time.Now()))
@@ -156,59 +237,150 @@ func TestTOTPSetupFlow(t *testing.T) {
 		t.Fatalf("hotp: %v", err)
 	}
 
-	if _, err := a.ConfirmTOTPSetup(httptest.NewRequest(http.MethodPost, "/", nil), "000000"); err == nil {
+	if _, err := a.ConfirmTOTPSetup(reqFor(), "000000"); err == nil {
 		t.Fatalf("a wrong code must not confirm setup")
 	}
-	if _, err := a.ConfirmTOTPSetup(httptest.NewRequest(http.MethodPost, "/", nil), code); err != nil {
+	userID, err := a.ConfirmTOTPSetup(reqFor(), code)
+	if err != nil {
 		t.Fatalf("ConfirmTOTPSetup with the correct code: %v", err)
 	}
-	if !a.TOTPConfigured() {
-		t.Fatalf("TOTPConfigured should be true once the code is confirmed")
+	if userID != u.ID {
+		t.Fatalf("ConfirmTOTPSetup userID = %d, want %d", userID, u.ID)
+	}
+	if u.TOTPSecret == "" {
+		t.Fatalf("the account's TOTPSecret should be set once the code is confirmed")
 	}
 }
 
 // Everyday login once 2FA is already set up: right code passes, wrong code
 // fails, and the same code cannot be replayed a second time.
 func TestVerifyTOTPCodeAndReplayProtection(t *testing.T) {
-	a := newTestAuth(t, "correct horse battery staple")
+	a, _, u := newTestAuth(t, "correct horse battery staple")
 	secret, _ := generateTOTPSecret()
-	a.SetTOTPSecret(secret)
+	u.TOTPSecret = secret
+
+	loginRec := httptest.NewRecorder()
+	if _, err := a.Login(loginRec, httptest.NewRequest(http.MethodPost, "/", nil),
+		"alice", "correct horse battery staple"); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	pending := cookieFrom(t, loginRec, pendingCookie)
+	reqFor := func() *http.Request { return reqWithCookie(pendingCookie, pending) }
 
 	code, err := hotp(secret, totpStep(time.Now()))
 	if err != nil {
 		t.Fatalf("hotp: %v", err)
 	}
 
-	if err := a.VerifyTOTPCode(httptest.NewRequest(http.MethodPost, "/", nil), "000000"); err == nil {
+	if _, err := a.VerifyTOTPCode(reqFor(), "000000"); err == nil {
 		t.Fatalf("a wrong code must be rejected")
 	}
-	if err := a.VerifyTOTPCode(httptest.NewRequest(http.MethodPost, "/", nil), code); err != nil {
+	userID, err := a.VerifyTOTPCode(reqFor(), code)
+	if err != nil {
 		t.Fatalf("the correct current code should be accepted: %v", err)
 	}
-	if err := a.VerifyTOTPCode(httptest.NewRequest(http.MethodPost, "/", nil), code); err == nil {
+	if userID != u.ID {
+		t.Fatalf("VerifyTOTPCode userID = %d, want %d", userID, u.ID)
+	}
+	if _, err := a.VerifyTOTPCode(reqFor(), code); err == nil {
 		t.Fatalf("the same code must not be accepted twice")
 	}
 }
 
 // TOTPSecretForDisplay is the "add 2FA to another device" feature's data
-// source: it must report nothing until setup is confirmed, and must return
-// the same secret afterward — not a freshly generated one — since the whole
-// point is scanning the existing enrollment onto a second device.
+// source: it must report nothing without a real session, and must return the
+// same secret an authenticated session's own account has confirmed — not a
+// freshly generated one — since the whole point is scanning the existing
+// enrollment onto a second device.
 func TestTOTPSecretForDisplay(t *testing.T) {
-	a := newTestAuth(t, "correct horse battery staple")
-	if _, ok := a.TOTPSecretForDisplay(); ok {
-		t.Fatalf("a fresh account should report ok=false before 2FA is set up")
+	a, _, u := newTestAuth(t, "correct horse battery staple")
+
+	anon := httptest.NewRequest(http.MethodGet, "/", nil)
+	if _, ok := a.TOTPSecretForDisplay(anon); ok {
+		t.Fatalf("no session at all should report ok=false")
 	}
 
 	secret, _ := generateTOTPSecret()
-	a.SetTOTPSecret(secret)
+	u.TOTPSecret = secret
 
-	got, ok := a.TOTPSecretForDisplay()
+	sessRec := httptest.NewRecorder()
+	a.IssueSession(sessRec, u.ID)
+	session := cookieFrom(t, sessRec, sessionCookie)
+
+	got, ok := a.TOTPSecretForDisplay(reqWithCookie(sessionCookie, session))
 	if !ok {
-		t.Fatalf("ok=false once 2FA is set up")
+		t.Fatalf("ok=false for a session whose account has 2FA set up")
 	}
 	if got != secret {
 		t.Fatalf("TOTPSecretForDisplay = %q, want the same secret %q", got, secret)
 	}
 }
 
+// A temporary password blocks everything else until it's replaced — the new
+// admin account flow: Login stops at "change_password" before ever offering
+// 2FA setup, ChangePasswordPending clears the flag and the pending cookie
+// still identifies the same account afterward, and only then does the
+// normal "setup" stage (this account has no 2FA yet either) show up.
+func TestMustChangePasswordBlocksLoginUntilReplaced(t *testing.T) {
+	users := newFakeUsers()
+	u := users.addUser(t, "klon", "1234567890", store.RoleAdmin)
+	u.MustChangePassword = true
+	a, err := New(users, filepath.Join(t.TempDir(), "session.key"), false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	loginRec := httptest.NewRecorder()
+	stage, err := a.Login(loginRec, httptest.NewRequest(http.MethodPost, "/", nil), "klon", "1234567890")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if stage != "change_password" {
+		t.Fatalf("stage = %q, want %q", stage, "change_password")
+	}
+	pending := cookieFrom(t, loginRec, pendingCookie)
+
+	// The pending cookie alone must not be enough to skip straight to 2FA
+	// setup while the account is still on its temporary password — even a
+	// client that never goes through the HTTP layer's own stage check.
+	if _, err := a.BeginTOTPSetup(reqWithCookie(pendingCookie, pending)); err == nil {
+		t.Fatalf("BeginTOTPSetup must refuse an account that still has MustChangePassword set")
+	}
+
+	newStage, err := a.ChangePasswordPending(reqWithCookie(pendingCookie, pending), "a genuinely new password")
+	if err != nil {
+		t.Fatalf("ChangePasswordPending: %v", err)
+	}
+	if newStage != "setup" {
+		t.Fatalf("stage after changing password = %q, want %q (no 2FA on this account yet)", newStage, "setup")
+	}
+	if u.MustChangePassword {
+		t.Fatalf("MustChangePassword should be cleared once a new password is set")
+	}
+
+	// The old temporary password must no longer work, and the new one must.
+	if !VerifyPassword(u.PasswordHash, "a genuinely new password") {
+		t.Fatalf("the new password was not actually saved")
+	}
+	if VerifyPassword(u.PasswordHash, "1234567890") {
+		t.Fatalf("the old temporary password should no longer verify")
+	}
+}
+
+// Configured() reflects whatever the store reports, live — not a value
+// captured once at startup, since an account added with `goldstar user-add`
+// to a running server has to work without a restart.
+func TestConfiguredReflectsLiveUserCount(t *testing.T) {
+	users := newFakeUsers()
+	a, err := New(users, filepath.Join(t.TempDir(), "session.key"), false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if a.Configured() {
+		t.Fatalf("Configured() should be false with zero accounts")
+	}
+	users.addUser(t, "alice", "correct horse battery staple", store.RoleAdmin)
+	if !a.Configured() {
+		t.Fatalf("Configured() should be true once an account exists")
+	}
+}

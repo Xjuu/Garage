@@ -61,6 +61,14 @@ Usage:
                      Safe to run any time — a no-op once it's already hashed.
   goldstar totp-reset  Clear two-factor auth — the next login has to set it up again.
                      Use this if the device with the authenticator app is lost.
+  goldstar user-add <username> <password> <admin|fleet> [email]
+                     Create a dashboard account. Always starts with a forced
+                     password change and 2FA setup required on its first login,
+                     whatever password is given here.
+  goldstar user-role <username> <admin|fleet>
+                     Change an existing account's role. admin reaches every
+                     page; fleet is everything except Training and Admin.
+  goldstar user-list  List dashboard accounts and their role / 2FA status.
   goldstar doctor    Check configuration and connectivity without changing anything
   goldstar models    List the Gemini models this API key can call
 
@@ -142,6 +150,10 @@ func realMain(cmd string) error {
 		return err
 	}
 	defer db.Close()
+
+	if err := migrateLegacyAccount(cfg, db); err != nil {
+		return fmt.Errorf("migrate legacy account: %w", err)
+	}
 
 	// Ctrl-C and systemd stop both unwind cleanly mid-fetch.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -263,10 +275,122 @@ func realMain(cmd string) error {
 		return nil
 	case "doctor":
 		return doctor(cfg, db)
+	case "user-add":
+		return userAdd(db)
+	case "user-role":
+		return userRole(db)
+	case "user-list":
+		return userList(db)
 	default:
 		fmt.Println(usage)
 		return fmt.Errorf("unknown command %q", cmd)
 	}
+}
+
+// migrateLegacyAccount seeds the users table from the old single-account
+// env/file-based config (GOLDSTAR_USER, GOLDSTAR_PASSWORD_HASH, the
+// totp.secret file) the first time this runs against a database that
+// predates multi-user accounts — so an existing install's login keeps
+// working, unchanged, the moment it upgrades, with no manual step. A no-op
+// on every later run: once any user row exists, this never touches the
+// table again, so an operator who explicitly deletes every account is not
+// silently undone.
+func migrateLegacyAccount(cfg *config.Config, db *store.Store) error {
+	n, err := db.UserCount()
+	if err != nil {
+		return err
+	}
+	if n > 0 || cfg.PasswordHash == "" {
+		return nil
+	}
+	username := cfg.User
+	if username == "" {
+		username = cfg.Email
+	}
+	if username == "" {
+		username = "admin"
+	}
+	id, err := db.CreateUser(username, cfg.Email, cfg.PasswordHash, store.RoleAdmin, false)
+	if err != nil {
+		return err
+	}
+	if cfg.TOTPSecret != "" {
+		if err := db.SetUserTOTPSecret(id, cfg.TOTPSecret); err != nil {
+			return err
+		}
+	}
+	log.Printf("migrated the existing dashboard login into the accounts table as %q", username)
+	return nil
+}
+
+// userAdd is `goldstar user-add <username> <password> <admin|fleet> [email]`.
+// The account always starts requiring a forced password change and 2FA
+// setup on its first login — whatever password is typed here to create it
+// was necessarily chosen by whoever is running this command, not by the
+// account's own owner, so it can never be treated as a real, permanent one.
+func userAdd(db *store.Store) error {
+	if len(os.Args) < 5 {
+		return fmt.Errorf("usage: goldstar user-add <username> <password> <admin|fleet> [email]")
+	}
+	username, password, role := os.Args[2], os.Args[3], os.Args[4]
+	email := ""
+	if len(os.Args) > 5 {
+		email = os.Args[5]
+	}
+	if role != store.RoleAdmin && role != store.RoleFleet {
+		return fmt.Errorf("role must be %q or %q, got %q", store.RoleAdmin, store.RoleFleet, role)
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return err
+	}
+	id, err := db.CreateUser(username, email, hash, role, true)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Created account %q (role %s, id %d).\n", username, role, id)
+	fmt.Println("Its next login will be required to set a real password and then set up two-factor authentication before reaching the dashboard.")
+	return nil
+}
+
+// userRole is `goldstar user-role <username> <admin|fleet>`.
+func userRole(db *store.Store) error {
+	if len(os.Args) < 4 {
+		return fmt.Errorf("usage: goldstar user-role <username> <admin|fleet>")
+	}
+	u, err := db.GetUserByIdentity(os.Args[2])
+	if err != nil {
+		return fmt.Errorf("no such account %q", os.Args[2])
+	}
+	if err := db.SetUserRole(u.ID, os.Args[3]); err != nil {
+		return err
+	}
+	fmt.Printf("%q is now role %q.\n", u.Username, os.Args[3])
+	return nil
+}
+
+// userList is `goldstar user-list`.
+func userList(db *store.Store) error {
+	users, err := db.ListUsers()
+	if err != nil {
+		return err
+	}
+	if len(users) == 0 {
+		fmt.Println("No accounts yet.")
+		return nil
+	}
+	for _, u := range users {
+		totp := "no 2FA yet"
+		if u.TOTPSecret != "" {
+			totp = "2FA set up"
+		}
+		change := ""
+		if u.MustChangePassword {
+			change = ", must change password on next login"
+		}
+		fmt.Printf("%-20s role=%-6s %s%s\n", u.Username, u.Role, totp, change)
+	}
+	return nil
 }
 
 func runFetch(ctx context.Context, cfg *config.Config, db *store.Store) error {
@@ -529,7 +653,6 @@ func doctor(cfg *config.Config, db *store.Store) error {
 	fmt.Printf("gemini key   %s\n", secretState(cfg.GeminiKey))
 	fmt.Printf("gemini model %s\n", cfg.GeminiModel)
 	fmt.Printf("web addr     %s\n", cfg.WebAddr)
-	fmt.Printf("web password %s\n", secretState(cfg.PasswordHash))
 	fmt.Printf("cookie secure %v\n", cfg.CookieSecure)
 
 	invoices, items, err := db.Counts()
@@ -538,18 +661,38 @@ func doctor(cfg *config.Config, db *store.Store) error {
 	}
 	fmt.Printf("stored       %d invoice(s), %d line item(s)\n", invoices, items)
 
+	// Accounts live in the database now, not a single hash in .env — the
+	// real answer to "is this dashboard guarded" is how many rows exist,
+	// checked live rather than read off cfg.PasswordHash, which after this
+	// install's first run only ever reflects the legacy bootstrap value.
+	users, err := db.ListUsers()
+	if err != nil {
+		return err
+	}
+
 	// The combination that would publish financial records to the internet.
 	switch {
-	case cfg.PasswordHash != "":
-		fmt.Printf("\nDASHBOARD   password set\n")
+	case len(users) > 0:
+		fmt.Printf("\nDASHBOARD   %d account(s):\n", len(users))
+		for _, u := range users {
+			totp := "no 2FA yet"
+			if u.TOTPSecret != "" {
+				totp = "2FA set up"
+			}
+			change := ""
+			if u.MustChangePassword {
+				change = ", must change password on next login"
+			}
+			fmt.Printf("            %-20s role=%-6s %s%s\n", u.Username, u.Role, totp, change)
+		}
 		if !cfg.CookieSecure {
 			fmt.Printf("            note: set GOLDSTAR_COOKIE_SECURE=true when serving through a tunnel\n")
 		}
 	case cfg.AllowNoPassword:
 		fmt.Printf("\nDASHBOARD   NO PASSWORD (explicitly allowed). Anyone who can reach %s sees every invoice.\n", cfg.WebAddr)
 	default:
-		fmt.Printf("\nDASHBOARD   REFUSES TO START: no password set.\n")
-		fmt.Printf("            Run `goldstar passwd` and add the printed line to your .env.\n")
+		fmt.Printf("\nDASHBOARD   REFUSES TO START: no account exists.\n")
+		fmt.Printf("            Run `goldstar user-add <username> <password> admin` to create one.\n")
 	}
 
 	if err := cfg.RequireMail(); err != nil {

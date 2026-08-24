@@ -30,6 +30,25 @@
       <div class="login-err" id="err" role="alert"></div>
     </form>
 
+    <!-- Shown once a correct password proves this account is still
+         carrying a temporary one, set by whoever created it — required
+         before anything else, including 2FA setup. -->
+    <div id="change-password" class="totp-panel" hidden>
+      <p class="sub">This account still has a temporary password. Set a real
+        one to continue.</p>
+      <form id="change-password-form">
+        <div class="field">
+          <label for="new-password">New password</label>
+          <input type="password" id="new-password" name="new-password"
+                 autocomplete="new-password" required minlength="10"
+                 placeholder="at least 10 characters">
+        </div>
+        <button class="btn solid" type="submit" id="change-password-submit">Set password and continue</button>
+        <div class="login-err" id="change-password-err" role="alert"></div>
+      </form>
+      <a href="#" class="totp-restart" id="change-password-restart">Not you? Sign in again</a>
+    </div>
+
     <!-- Shown once a correct password proves this account has never
          finished 2FA setup — mandatory before the dashboard is reachable. -->
     <div id="totp-setup" class="totp-panel" hidden>

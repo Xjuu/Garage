@@ -17,22 +17,24 @@ import (
 )
 
 // routesTraining registers the example library, supplier hints, and the eval
-// regression run — the machinery that teaches the extractor.
+// regression run — the machinery that teaches the extractor. Every route is
+// wrapped in requireAdmin: a "fleet" account's nav never links to Training,
+// but that's only the UI, so the same check has to hold here too.
 func (s *Server) routesTraining(api *http.ServeMux) {
-	api.HandleFunc("GET /api/examples", s.json(s.examples))
-	api.HandleFunc("POST /api/examples/scan", s.json(s.scanExamples))
-	api.HandleFunc("POST /api/examples/upload", s.json(s.uploadExample))
-	api.HandleFunc("PATCH /api/examples/{id}", s.json(s.saveExample))
-	api.HandleFunc("DELETE /api/examples/{id}", s.json(s.deleteExample))
-	api.HandleFunc("POST /api/examples/{id}/prefill", s.json(s.prefillExample))
-	api.HandleFunc("GET /api/examples/{id}/doc", s.exampleDoc)
+	api.HandleFunc("GET /api/examples", s.requireAdmin(s.json(s.examples)))
+	api.HandleFunc("POST /api/examples/scan", s.requireAdmin(s.json(s.scanExamples)))
+	api.HandleFunc("POST /api/examples/upload", s.requireAdmin(s.json(s.uploadExample)))
+	api.HandleFunc("PATCH /api/examples/{id}", s.requireAdmin(s.json(s.saveExample)))
+	api.HandleFunc("DELETE /api/examples/{id}", s.requireAdmin(s.json(s.deleteExample)))
+	api.HandleFunc("POST /api/examples/{id}/prefill", s.requireAdmin(s.json(s.prefillExample)))
+	api.HandleFunc("GET /api/examples/{id}/doc", s.requireAdmin(s.exampleDoc))
 
-	api.HandleFunc("GET /api/hints", s.json(s.hints))
-	api.HandleFunc("POST /api/hints", s.json(s.saveHint))
-	api.HandleFunc("DELETE /api/hints/{id}", s.json(s.deleteHint))
+	api.HandleFunc("GET /api/hints", s.requireAdmin(s.json(s.hints)))
+	api.HandleFunc("POST /api/hints", s.requireAdmin(s.json(s.saveHint)))
+	api.HandleFunc("DELETE /api/hints/{id}", s.requireAdmin(s.json(s.deleteHint)))
 
-	api.HandleFunc("POST /api/eval", s.json(s.startEval))
-	api.HandleFunc("GET /api/evals", s.json(s.evalRuns))
+	api.HandleFunc("POST /api/eval", s.requireAdmin(s.json(s.startEval)))
+	api.HandleFunc("GET /api/evals", s.requireAdmin(s.json(s.evalRuns)))
 }
 
 func (s *Server) examples(r *http.Request) (any, error) {

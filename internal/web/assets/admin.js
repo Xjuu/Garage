@@ -35,6 +35,7 @@ async function loadAdmin() {
     ['Gemini model', modelPicker(a.gemini_model)],
     ['Scan window', `${a.lookback_days} days`],
     ['Dashboard address', esc(a.web_addr)],
+    ['Signed in as', a.username ? esc(a.username) : warn('no account — open to anyone')],
     ['Dashboard password', a.password_set ? ok('set') : warn('NOT SET')],
     ['Two-factor authentication', a.totp_set ? ok('set up')
       : warn('will be required on the next login')],

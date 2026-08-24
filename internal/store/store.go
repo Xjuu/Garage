@@ -266,6 +266,27 @@ CREATE TABLE IF NOT EXISTS eval_runs (
   fields_all  INTEGER NOT NULL DEFAULT 0,
   detail_json TEXT NOT NULL DEFAULT ''
 );
+
+-- Dashboard accounts ---------------------------------------------------------
+
+-- Every account that can sign in to the main dashboard — distinct from
+-- repairs.<domain>, which the whole crew shares one PIN for (see
+-- repairs_devices above). "role" is what the nav and the API route gate on:
+-- "admin" reaches everything; "fleet" cannot reach Training or Admin (see
+-- internal/web's requireAdmin). must_change_password forces a fresh
+-- password before anything else on the very next login — how a
+-- freshly-created account with a temporary password gets upgraded to a real
+-- one without an operator ever knowing what the owner picked.
+CREATE TABLE IF NOT EXISTS users (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  username             TEXT NOT NULL UNIQUE,
+  email                TEXT NOT NULL DEFAULT '',
+  password_hash        TEXT NOT NULL,
+  role                 TEXT NOT NULL DEFAULT 'admin',
+  totp_secret          TEXT NOT NULL DEFAULT '',
+  must_change_password INTEGER NOT NULL DEFAULT 0,
+  created_at           TEXT NOT NULL
+);
 `
 
 // seed inserts the fleet the user actually operates. Overall Clients is the

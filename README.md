@@ -57,7 +57,10 @@ goldstar doctor                          # verifies config + mailbox login
 | `goldstar ingest FILE…` | Extract from local PDFs or photos — scanned paper invoices, or files saved out of a mail client. |
 | `goldstar export` | Rebuild the workbook from stored data. |
 | `goldstar serve` | Dashboard on <http://127.0.0.1:8787>. |
-| `goldstar passwd` | Generate the dashboard password hash. |
+| `goldstar user-add USER PASS admin\|fleet` | Create a dashboard account. Its first login is required to set a real password and 2FA before reaching anything — `admin` sees every page, `fleet` is everything except Training and Admin. |
+| `goldstar user-role USER admin\|fleet` | Change an existing account's role. |
+| `goldstar user-list` | List accounts and their role / 2FA status. |
+| `goldstar passwd` | Generate a password hash (used internally by `user-add`; rarely needed directly). |
 | `goldstar totp-reset` | Clear two-factor auth. Use this if the authenticator device is lost — the next login sets it up again from a new QR code. |
 | `goldstar doctor` | Check config and mailbox connectivity. Changes nothing. |
 | `goldstar examples` | Register new reference invoices from the examples folder. |
@@ -165,7 +168,7 @@ evidence that a site is private — a tunnel would publish it to the internet
 regardless.
 
 ```sh
-goldstar passwd     # paste the printed line into your .env
+goldstar user-add yourname a-strong-password admin
 ```
 
 Full walkthrough, including Cloudflare Access as a second gate, plus an honest

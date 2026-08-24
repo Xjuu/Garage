@@ -20,19 +20,20 @@ const totpIssuer = "Garage Goldstar"
 // only while this account has not finished setup yet.
 func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if !s.auth.PendingOK(r) {
+	u, ok := s.auth.PendingUser(r)
+	if !ok {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"error": "sign in again"})
 		return
 	}
-	secret, err := s.auth.BeginTOTPSetup()
+	secret, err := s.auth.BeginTOTPSetup(r)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
-	otpURL := auth.TOTPURL(totpIssuer, s.auth.AccountLabel(), secret)
+	otpURL := auth.TOTPURL(totpIssuer, auth.AccountLabel(u), secret)
 	png, err := qrcode.Encode(otpURL, qrcode.Medium, 256)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -43,7 +44,7 @@ func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"secret":  auth.FormatSecretForDisplay(secret),
 		"qr_png":  "data:image/png;base64," + base64.StdEncoding.EncodeToString(png),
-		"account": s.auth.AccountLabel(),
+		"account": auth.AccountLabel(u),
 	})
 }
 
@@ -52,7 +53,7 @@ func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
 // real — this is the only path from "just set up 2FA" to an actual session.
 func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if !s.auth.PendingOK(r) {
+	if _, ok := s.auth.PendingUser(r); !ok {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"error": "sign in again"})
 		return
@@ -66,24 +67,16 @@ func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	secret, err := s.auth.ConfirmTOTPSetup(r, body.Code)
+	userID, err := s.auth.ConfirmTOTPSetup(r, body.Code)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-	if err := s.cfg.WriteTOTPSecret(secret); err != nil {
-		// The in-memory secret is already live at this point — a write
-		// failure here means it will not survive a restart, which is worth
-		// surfacing rather than silently pretending setup fully succeeded.
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "2FA verified but could not be saved: " + err.Error(),
-		})
-		return
-	}
 
-	s.auth.IssueSession(w)
+	// The secret is already persisted to the account's row by
+	// ConfirmTOTPSetup itself — nothing left to save here.
+	s.auth.IssueSession(w, userID)
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
@@ -91,7 +84,7 @@ func (s *Server) handleTOTPConfirm(w http.ResponseWriter, r *http.Request) {
 // set up, and a valid code turns the pending cookie into a real session.
 func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if !s.auth.PendingOK(r) {
+	if _, ok := s.auth.PendingUser(r); !ok {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"error": "sign in again"})
 		return
@@ -105,13 +98,14 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.auth.VerifyTOTPCode(r, body.Code); err != nil {
+	userID, err := s.auth.VerifyTOTPCode(r, body.Code)
+	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
-	s.auth.IssueSession(w)
+	s.auth.IssueSession(w, userID)
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
@@ -125,12 +119,16 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 // Remove this handler, its route in admin.go, and the matching panel in the
 // Admin page once it is no longer needed.
 func (s *Server) totpReshow(r *http.Request) (any, error) {
-	secret, ok := s.auth.TOTPSecretForDisplay()
+	u, ok := s.auth.CurrentUser(r)
+	if !ok {
+		return nil, fail(http.StatusUnauthorized, "sign in again")
+	}
+	secret, ok := s.auth.TOTPSecretForDisplay(r)
 	if !ok {
 		return nil, fail(http.StatusBadRequest, "2FA is not set up on this account yet")
 	}
 
-	otpURL := auth.TOTPURL(totpIssuer, s.auth.AccountLabel(), secret)
+	otpURL := auth.TOTPURL(totpIssuer, auth.AccountLabel(u), secret)
 	png, err := qrcode.Encode(otpURL, qrcode.Medium, 256)
 	if err != nil {
 		return nil, err

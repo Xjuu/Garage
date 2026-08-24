@@ -17,20 +17,23 @@ import (
 )
 
 // routesAdmin registers the management endpoints: what is configured, whether
-// the connections work, and the data-level operations.
+// the connections work, and the data-level operations. Every one of these is
+// wrapped in requireAdmin — a "fleet" account's nav never links to any of
+// this, but that's only the UI; the same check is what actually stops it
+// from being reached by hand.
 func (s *Server) routesAdmin(api *http.ServeMux) {
-	api.HandleFunc("GET /api/admin/status", s.json(s.adminStatus))
-	api.HandleFunc("POST /api/admin/test-imap", s.json(s.testIMAP))
-	api.HandleFunc("POST /api/admin/test-gemini", s.json(s.testGemini))
-	api.HandleFunc("GET /api/admin/models", s.json(s.adminModels))
-	api.HandleFunc("POST /api/admin/password", s.json(s.changePassword))
-	api.HandleFunc("POST /api/admin/mailbox", s.json(s.saveMailbox))
-	api.HandleFunc("POST /api/admin/backup-now", s.json(s.backupNow))
-	api.HandleFunc("POST /api/admin/vacuum", s.json(s.vacuum))
-	api.HandleFunc("GET /api/admin/backup", s.backup)
-	api.HandleFunc("GET /api/admin/logs", s.json(s.recentLogs))
+	api.HandleFunc("GET /api/admin/status", s.requireAdmin(s.json(s.adminStatus)))
+	api.HandleFunc("POST /api/admin/test-imap", s.requireAdmin(s.json(s.testIMAP)))
+	api.HandleFunc("POST /api/admin/test-gemini", s.requireAdmin(s.json(s.testGemini)))
+	api.HandleFunc("GET /api/admin/models", s.requireAdmin(s.json(s.adminModels)))
+	api.HandleFunc("POST /api/admin/password", s.requireAdmin(s.json(s.changePassword)))
+	api.HandleFunc("POST /api/admin/mailbox", s.requireAdmin(s.json(s.saveMailbox)))
+	api.HandleFunc("POST /api/admin/backup-now", s.requireAdmin(s.json(s.backupNow)))
+	api.HandleFunc("POST /api/admin/vacuum", s.requireAdmin(s.json(s.vacuum)))
+	api.HandleFunc("GET /api/admin/backup", s.requireAdmin(s.backup))
+	api.HandleFunc("GET /api/admin/logs", s.requireAdmin(s.json(s.recentLogs)))
 	// TEMP — see totpReshow in totp.go.
-	api.HandleFunc("GET /api/admin/totp-qr", s.json(s.totpReshow))
+	api.HandleFunc("GET /api/admin/totp-qr", s.requireAdmin(s.json(s.totpReshow)))
 }
 
 // recentLogs backs the temporary "Server log" panel on the Admin page: the
@@ -57,6 +60,16 @@ func (s *Server) adminStatus(r *http.Request) (any, error) {
 	}
 	hints, _ := s.db.Hints()
 
+	// Only the current session's own 2FA status — every account manages its
+	// own enrollment independently now, so there's no single "is 2FA set up"
+	// answer for the install as a whole any more.
+	totpSet := false
+	username := ""
+	if u, ok := s.auth.CurrentUser(r); ok {
+		totpSet = u.TOTPSecret != ""
+		username = u.Username
+	}
+
 	return map[string]any{
 		"backups":        pipeline.BackupStatus(s.cfg),
 		"schedule":       s.sched.Status(),
@@ -75,8 +88,9 @@ func (s *Server) adminStatus(r *http.Request) (any, error) {
 		"lookback_days":  s.cfg.LookbackDays,
 		"web_addr":       s.cfg.WebAddr,
 		"cookie_secure":  s.cfg.CookieSecure,
+		"username":       username,
 		"password_set":   s.auth.Configured(),
-		"totp_set":       s.auth.TOTPConfigured(),
+		"totp_set":       totpSet,
 		"invoices":       invoices,
 		"items":          items,
 		"examples":       len(examples),
@@ -159,17 +173,20 @@ func (s *Server) changePassword(r *http.Request) (any, error) {
 	if err := decode(r, &body); err != nil {
 		return nil, err
 	}
-	if s.auth.Configured() && !s.auth.Verify(body.Current) {
+	u, ok := s.auth.CurrentUser(r)
+	if !ok {
+		return nil, fail(http.StatusUnauthorized, "sign in again")
+	}
+	if !auth.VerifyPassword(u.PasswordHash, body.Current) {
 		return nil, fail(http.StatusForbidden, "current password is incorrect")
 	}
 	hash, err := auth.HashPassword(body.New)
 	if err != nil {
 		return nil, fail(http.StatusBadRequest, "%v", err)
 	}
-	if err := s.cfg.WritePasswordHash(hash); err != nil {
+	if err := s.db.SetUserPasswordHash(u.ID, hash); err != nil {
 		return nil, err
 	}
-	s.auth.SetHash(hash)
 	return map[string]any{
 		"ok":      true,
 		"message": "password changed — existing sessions stay signed in",

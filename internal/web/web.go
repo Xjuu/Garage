@@ -57,12 +57,10 @@ func New(cfg *config.Config, db *store.Store) (*Server, error) {
 	logs := newLogBuffer(500)
 	log.SetOutput(io.MultiWriter(os.Stderr, logs))
 
-	a, err := auth.New(cfg.PasswordHash, cfg.SessionKeyPath(), cfg.CookieSecure)
+	a, err := auth.New(db, cfg.SessionKeyPath(), cfg.CookieSecure)
 	if err != nil {
 		return nil, err
 	}
-	a.SetIdentity(cfg.User, cfg.Email)
-	a.SetTOTPSecret(cfg.TOTPSecret)
 	// A password is required unless explicitly waived. Checking the bind
 	// address is not enough: cloudflared connects over loopback, so a tunnel
 	// publishes a 127.0.0.1 listener to the whole internet.
@@ -127,6 +125,7 @@ func (s *Server) Listen(ctx context.Context, addr string) error {
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/session", s.handleSession)
+	mux.HandleFunc("POST /api/login/change-password", s.handleChangePendingPassword)
 	mux.HandleFunc("POST /api/login/totp/setup", s.handleTOTPSetup)
 	mux.HandleFunc("POST /api/login/totp/confirm", s.handleTOTPConfirm)
 	mux.HandleFunc("POST /api/login/totp/verify", s.handleTOTPVerify)
@@ -298,19 +297,51 @@ func (s *Server) json(h handler) http.HandlerFunc {
 	}
 }
 
+// requireAdmin wraps a route so only an admin-role account can reach it —
+// used for Training and Admin, which a "fleet" account's nav never even
+// shows a link to. Hiding the tab is a convenience; this is the actual
+// access control, since the same restricted account could otherwise still
+// reach these endpoints by hand.
+func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u, ok := s.auth.CurrentUser(r)
+		// "no password configured" mode has no real session to check —
+		// already wide open to everyone, so it's treated as admin too,
+		// same as handleSession does for the front end.
+		if s.auth.Configured() && (!ok || u.Role != store.RoleAdmin) {
+			http.Error(w, `{"error":"admin access required"}`, http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
+	authed := s.auth.IsAuthenticated(r)
 	page := "assets/index.html"
-	if !s.auth.IsAuthenticated(r) {
+	if !authed {
 		page = "assets/login.html"
 	}
 	b, err := assets.ReadFile(page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if authed {
+		// The signed-in account's role, stamped onto <body> so app.js can
+		// gate its own nav without an extra round trip — see the GROUPS
+		// comment in app.js. Defaults to admin for "no password configured"
+		// mode, which has no real session to read a role from and is
+		// already wide open to everyone.
+		role := store.RoleAdmin
+		if u, ok := s.auth.CurrentUser(r); ok {
+			role = u.Role
+		}
+		b = []byte(strings.Replace(string(b), "<body>", `<body data-role="`+role+`">`, 1))
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -345,21 +376,58 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
+// handleChangePendingPassword is the forced-change step for an account still
+// carrying a temporary password — reachable only mid-login, with a pending
+// cookie already set by handleLogin, same as the totp/* handlers below it.
+func (s *Server) handleChangePendingPassword(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	stage, err := s.auth.ChangePasswordPending(r, body.Password)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	// Same shape as /api/login's own response: "setup" or "verify" next,
+	// since a brand new account can need both a real password and 2FA.
+	json.NewEncoder(w).Encode(map[string]any{"ok": false, "stage": stage})
+}
+
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	authed := s.auth.IsAuthenticated(r)
 	out := map[string]any{
-		"authenticated": s.auth.IsAuthenticated(r),
+		"authenticated": authed,
 		"password_set":  s.auth.Configured(),
 	}
-	// A reload in the middle of the 2FA step has no session cookie yet, only
-	// the pending one — without this, refreshing the setup or verify page
-	// would just bounce back to the password form and lose the QR code.
-	if !out["authenticated"].(bool) && s.auth.PendingOK(r) {
+	if authed {
+		// Missing only in "no password configured" mode, where nothing
+		// gates the dashboard and there is no real session to name — the
+		// front end treats that the same as an admin, since that mode is
+		// already wide open to everyone.
+		if u, ok := s.auth.CurrentUser(r); ok {
+			out["username"] = u.Username
+			out["role"] = u.Role
+		}
+	} else if u, ok := s.auth.PendingUser(r); ok {
+		// A reload mid-login has no session cookie yet, only the pending
+		// one — without this, refreshing the page would just bounce back
+		// to the password form and lose the QR code or the change-password
+		// step it was on.
 		out["totp_pending"] = true
-		if s.auth.TOTPConfigured() {
-			out["totp_stage"] = "verify"
-		} else {
+		switch {
+		case u.MustChangePassword:
+			out["totp_stage"] = "change_password"
+		case u.TOTPSecret == "":
 			out["totp_stage"] = "setup"
+		default:
+			out["totp_stage"] = "verify"
 		}
 	}
 	json.NewEncoder(w).Encode(out)

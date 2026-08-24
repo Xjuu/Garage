@@ -8,14 +8,14 @@ import (
 
 // routesRepairsAdmin registers the dashboard-side management for the
 // repairs log — everything here sits behind the normal dashboard auth
-// (password + 2FA), same as the rest of /api/admin/*. It has nothing to do
-// with repairsauth itself; an admin managing the repairs site does so from
-// the main dashboard, not from repairs.<domain>.
+// (password + 2FA) AND requireAdmin, same as the rest of /api/admin/*. It
+// has nothing to do with repairsauth itself; an admin managing the repairs
+// site does so from the main dashboard, not from repairs.<domain>.
 func (s *Server) routesRepairsAdmin(api *http.ServeMux) {
-	api.HandleFunc("GET /api/admin/repairs-devices", s.json(s.listRepairsDevices))
-	api.HandleFunc("POST /api/admin/repairs-devices/revoke", s.json(s.revokeRepairsDevice))
-	api.HandleFunc("GET /api/admin/repairs-recent", s.json(s.recentRepairsAdmin))
-	api.HandleFunc("POST /api/admin/repairs-pin", s.json(s.changeRepairsPIN))
+	api.HandleFunc("GET /api/admin/repairs-devices", s.requireAdmin(s.json(s.listRepairsDevices)))
+	api.HandleFunc("POST /api/admin/repairs-devices/revoke", s.requireAdmin(s.json(s.revokeRepairsDevice)))
+	api.HandleFunc("GET /api/admin/repairs-recent", s.requireAdmin(s.json(s.recentRepairsAdmin)))
+	api.HandleFunc("POST /api/admin/repairs-pin", s.requireAdmin(s.json(s.changeRepairsPIN)))
 }
 
 func (s *Server) listRepairsDevices(r *http.Request) (any, error) {

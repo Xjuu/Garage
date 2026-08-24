@@ -1,12 +1,15 @@
 // Login. Kept separate from app.js so the sign-in page loads nothing else.
 //
-// Three stages, one visible at a time: the password form, then — once the
-// password is right — either the 2FA setup panel (this account has never
-// finished it) or the 2FA verify panel (it already has). Nothing here ever
-// treats a correct password alone as "signed in": that only happens once
+// Four stages, one visible at a time: the password form, then — once the
+// password is right — whichever of these the account still needs, in
+// order: a forced change if it's still on a temporary password, then
+// either the 2FA setup panel (this account has never finished it) or the
+// 2FA verify panel (it already has). Nothing here ever treats a correct
+// password alone as "signed in": that only happens once
 // /api/login/totp/confirm or /api/login/totp/verify succeeds.
 
 const passwordPanel = document.getElementById('form');
+const changePasswordPanel = document.getElementById('change-password');
 const setupPanel = document.getElementById('totp-setup');
 const verifyPanel = document.getElementById('totp-verify');
 
@@ -14,7 +17,7 @@ const err = document.getElementById('err');
 const submit = document.getElementById('submit');
 
 function showPanel(panel) {
-  for (const p of [passwordPanel, setupPanel, verifyPanel]) p.hidden = p !== panel;
+  for (const p of [passwordPanel, changePasswordPanel, setupPanel, verifyPanel]) p.hidden = p !== panel;
 }
 
 async function postJSON(url, body) {
@@ -51,6 +54,30 @@ passwordPanel.addEventListener('submit', async (e) => {
     const pw = document.getElementById('password');
     pw.value = '';
     pw.focus();
+  }
+});
+
+// ── stage 1b: forced password change ────────────────────────────────────
+
+const changeForm = document.getElementById('change-password-form');
+const changeErr = document.getElementById('change-password-err');
+const changeSubmit = document.getElementById('change-password-submit');
+const newPassword = document.getElementById('new-password');
+
+changeForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  changeErr.textContent = '';
+  changeSubmit.disabled = true;
+  changeSubmit.textContent = 'Saving…';
+  try {
+    const data = await postJSON('/api/login/change-password', { password: newPassword.value });
+    await enterStage(data.stage);
+  } catch (e2) {
+    changeErr.textContent = e2.message;
+    changeSubmit.disabled = false;
+    changeSubmit.textContent = 'Set password and continue';
+    newPassword.value = '';
+    newPassword.focus();
   }
 });
 
@@ -118,7 +145,7 @@ for (const input of [setupCode, verifyCode]) {
 }
 
 // "Not you?" clears the pending cookie and starts over at the password form.
-for (const id of ['setup-restart', 'verify-restart']) {
+for (const id of ['change-password-restart', 'setup-restart', 'verify-restart']) {
   document.getElementById(id).addEventListener('click', async (e) => {
     e.preventDefault();
     await fetch('/api/logout', { method: 'POST' }).catch(() => {});
@@ -129,7 +156,10 @@ for (const id of ['setup-restart', 'verify-restart']) {
 // ── entering a stage, including resuming one after a reload ────────────
 
 async function enterStage(stage) {
-  if (stage === 'setup') {
+  if (stage === 'change_password') {
+    showPanel(changePasswordPanel);
+    newPassword.focus();
+  } else if (stage === 'setup') {
     showPanel(setupPanel);
     setupCode.focus();
     await loadSetupQR();
