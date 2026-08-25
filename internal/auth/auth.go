@@ -524,9 +524,20 @@ func (a *Auth) Protect(next http.Handler) http.Handler {
 			http.Error(w, `{"error":"not authenticated"}`, http.StatusUnauthorized)
 			return
 		}
-		if a.Configured() && isMutating(r.Method) && !a.csrfOK(r) {
-			http.Error(w, `{"error":"bad CSRF token"}`, http.StatusForbidden)
-			return
+		if isMutating(r.Method) {
+			if a.Configured() && !a.csrfOK(r) {
+				http.Error(w, `{"error":"bad CSRF token"}`, http.StatusForbidden)
+				return
+			}
+			// Checked centrally here, not per-route, so ReadOnly applies to
+			// every mutating endpoint uniformly the moment it's set on an
+			// account — nothing to remember to add it to later. Reads
+			// (GET) are never touched: "view only" means every GET still
+			// works exactly as normal.
+			if u, ok := a.CurrentUser(r); ok && u.ReadOnly {
+				http.Error(w, `{"error":"this is a view-only account — changes are disabled"}`, http.StatusForbidden)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})

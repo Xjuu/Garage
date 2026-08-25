@@ -522,16 +522,18 @@ td.strong { font-weight: 700; }
 }
 .toast.action .btn:hover { background: var(--g2); }
 
-/* ── Temporary-account banner ──────────────────────────────────────────
-   Hidden by default; shown only when the server stamps
-   <body data-temp="true"> for a TOTP-exempt shared login. */
+/* ── Temporary/read-only account banners ────────────────────────────────
+   Each line is hidden by default; the server stamps <body data-temp="true">
+   and/or data-readonly="true">, and each line's own rule below shows only
+   the one(s) that apply — they stack if both do, with no JS involved. */
 .temp-banner {
   display: none;
   background: var(--flag-bg); color: var(--flag); border-bottom: 1px solid var(--flag);
   font-size: 13px; font-weight: 700; text-align: center;
   padding: 8px 16px;
 }
-body[data-temp="true"] .temp-banner { display: block; }
+body[data-temp="true"] .temp-banner[data-when="temp"] { display: block; }
+body[data-readonly="true"] .temp-banner[data-when="readonly"] { display: block; }
 
 /* ── Cookie notice ──────────────────────────────────────────────────── */
 

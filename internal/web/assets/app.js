@@ -30,10 +30,17 @@ function readCookie(name) {
 }
 
 /** Every mutating call carries the CSRF cookie back as a header; the session
-    cookie itself stays HttpOnly. */
+    cookie itself stays HttpOnly. A read-only account (see <body data-readonly>,
+    stamped by the server for an account with ReadOnly set) is refused before
+    the request ever goes out — the server enforces this too (auth.Protect),
+    this just gives a clean, immediate message instead of a round trip that
+    was always going to come back 403. */
 async function api(path, opts = {}) {
   const o = { headers: {}, ...opts };
   if (o.method && o.method !== 'GET') {
+    if (document.body.dataset.readonly === 'true') {
+      throw new Error('This is a view-only account — changes are disabled.');
+    }
     o.headers['X-CSRF-Token'] = readCookie('goldstar_csrf');
   }
   if (o.json !== undefined) {

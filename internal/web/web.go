@@ -332,21 +332,26 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if authed {
-		// The signed-in account's role (and whether it's a TOTP-exempt
-		// shared login), stamped onto <body> so app.js can gate its nav and
-		// show the "temporary account" banner without an extra round trip —
-		// see the GROUPS comment in app.js. Role defaults to admin for "no
-		// password configured" mode, which has no real session to read a
-		// role from and is already wide open to everyone.
+		// The signed-in account's role, and whether it's a TOTP-exempt
+		// and/or read-only shared login, stamped onto <body> so app.js can
+		// gate its nav, block mutating calls client-side, and show the
+		// "temporary account" banner without an extra round trip — see the
+		// GROUPS comment and api() in app.js. Role defaults to admin for
+		// "no password configured" mode, which has no real session to read
+		// a role from and is already wide open to everyone.
 		role := store.RoleAdmin
-		temp := false
+		temp, readOnly := false, false
 		if u, ok := s.auth.CurrentUser(r); ok {
 			role = u.Role
 			temp = u.TOTPExempt
+			readOnly = u.ReadOnly
 		}
 		attrs := `data-role="` + role + `"`
 		if temp {
 			attrs += ` data-temp="true"`
+		}
+		if readOnly {
+			attrs += ` data-readonly="true"`
 		}
 		b = []byte(strings.Replace(string(b), "<body>", "<body "+attrs+">", 1))
 	}

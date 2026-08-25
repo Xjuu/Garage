@@ -19,6 +19,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -62,16 +63,21 @@ Usage:
                      Safe to run any time — a no-op once it's already hashed.
   goldstar totp-reset  Clear two-factor auth — the next login has to set it up again.
                      Use this if the device with the authenticator app is lost.
-  goldstar user-add <username> <password> <admin|fleet> [email] [--skip-setup]
+  goldstar user-add <username> <password> <admin|fleet> [email] [--skip-setup] [--read-only]
                      Create a dashboard account. Always starts with a forced
                      password change and 2FA setup required on its first login,
                      whatever password is given here — unless --skip-setup is
                      given, which signs it straight in with that exact
                      password instead, no forced change and no 2FA, ever.
-                     Meant only for a deliberately shared login.
+                     Meant only for a deliberately shared login. --read-only
+                     blocks it from changing, adding or deleting anything —
+                     it can only view.
   goldstar user-role <username> <admin|fleet>
                      Change an existing account's role. admin reaches every
                      page; fleet is everything except Training and Admin.
+  goldstar user-readonly <username> <true|false>
+                     Block (or unblock) every change, addition and deletion
+                     an existing account can make. Viewing is unaffected.
   goldstar user-list  List dashboard accounts and their role / 2FA status.
   goldstar user-passwd <username> [password]
                      Set an account's password directly — no old password
@@ -294,6 +300,8 @@ func realMain(cmd string) error {
 		return userList(db)
 	case "user-passwd":
 		return userPasswd(db)
+	case "user-readonly":
+		return userReadOnly(db)
 	default:
 		fmt.Println(usage)
 		return fmt.Errorf("unknown command %q", cmd)
@@ -344,11 +352,11 @@ func migrateLegacyAccount(cfg *config.Config, db *store.Store) error {
 // — unless --skip-setup says otherwise (see below).
 func userAdd(db *store.Store) error {
 	if len(os.Args) < 5 {
-		return fmt.Errorf("usage: goldstar user-add <username> <password> <admin|fleet> [email] [--skip-setup]")
+		return fmt.Errorf("usage: goldstar user-add <username> <password> <admin|fleet> [email] [--skip-setup] [--read-only]")
 	}
 	username, password, role := os.Args[2], os.Args[3], os.Args[4]
 	email := ""
-	skipSetup := false
+	skipSetup, readOnly := false, false
 	for _, a := range os.Args[5:] {
 		switch {
 		case a == "--skip-setup":
@@ -359,6 +367,8 @@ func userAdd(db *store.Store) error {
 			// would silently hand that one device permanent, exclusive
 			// ownership of an account meant for more than one person.
 			skipSetup = true
+		case a == "--read-only":
+			readOnly = true
 		case email == "":
 			email = a
 		}
@@ -374,11 +384,43 @@ func userAdd(db *store.Store) error {
 	if err != nil {
 		return err
 	}
+	if readOnly {
+		if err := db.SetUserReadOnly(id, true); err != nil {
+			return err
+		}
+	}
 	fmt.Printf("Created account %q (role %s, id %d).\n", username, role, id)
 	if skipSetup {
 		fmt.Println("--skip-setup: it signs straight in with the password given above — no forced change, no 2FA, ever. Meant only for a deliberately shared login.")
 	} else {
 		fmt.Println("Its next login will be required to set a real password and then set up two-factor authentication before reaching the dashboard.")
+	}
+	if readOnly {
+		fmt.Println("--read-only: every mutating request it makes is refused — it can only view, never change, add or delete anything.")
+	}
+	return nil
+}
+
+// userReadOnly is `goldstar user-readonly <username> <true|false>`.
+func userReadOnly(db *store.Store) error {
+	if len(os.Args) < 4 {
+		return fmt.Errorf("usage: goldstar user-readonly <username> <true|false>")
+	}
+	u, err := db.GetUserByIdentity(os.Args[2])
+	if err != nil {
+		return fmt.Errorf("no such account %q", os.Args[2])
+	}
+	readOnly, err := strconv.ParseBool(os.Args[3])
+	if err != nil {
+		return fmt.Errorf("expected true or false, got %q", os.Args[3])
+	}
+	if err := db.SetUserReadOnly(u.ID, readOnly); err != nil {
+		return err
+	}
+	if readOnly {
+		fmt.Printf("%q is now read-only — it can view but not change, add or delete anything.\n", u.Username)
+	} else {
+		fmt.Printf("%q can make changes again.\n", u.Username)
 	}
 	return nil
 }
@@ -411,14 +453,21 @@ func userList(db *store.Store) error {
 	}
 	for _, u := range users {
 		totp := "no 2FA yet"
-		if u.TOTPSecret != "" {
+		switch {
+		case u.TOTPExempt:
+			totp = "no 2FA required"
+		case u.TOTPSecret != "":
 			totp = "2FA set up"
 		}
 		change := ""
 		if u.MustChangePassword {
 			change = ", must change password on next login"
 		}
-		fmt.Printf("%-20s role=%-6s %s%s\n", u.Username, u.Role, totp, change)
+		readOnly := ""
+		if u.ReadOnly {
+			readOnly = ", read-only"
+		}
+		fmt.Printf("%-20s role=%-6s %s%s%s\n", u.Username, u.Role, totp, change, readOnly)
 	}
 	return nil
 }
@@ -776,14 +825,21 @@ func doctor(cfg *config.Config, db *store.Store) error {
 		fmt.Printf("\nDASHBOARD   %d account(s):\n", len(users))
 		for _, u := range users {
 			totp := "no 2FA yet"
-			if u.TOTPSecret != "" {
+			switch {
+			case u.TOTPExempt:
+				totp = "no 2FA required"
+			case u.TOTPSecret != "":
 				totp = "2FA set up"
 			}
 			change := ""
 			if u.MustChangePassword {
 				change = ", must change password on next login"
 			}
-			fmt.Printf("            %-20s role=%-6s %s%s\n", u.Username, u.Role, totp, change)
+			readOnly := ""
+			if u.ReadOnly {
+				readOnly = ", read-only"
+			}
+			fmt.Printf("            %-20s role=%-6s %s%s%s\n", u.Username, u.Role, totp, change, readOnly)
 		}
 		if !cfg.CookieSecure {
 			fmt.Printf("            note: set GOLDSTAR_COOKIE_SECURE=true when serving through a tunnel\n")

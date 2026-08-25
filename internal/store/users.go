@@ -38,16 +38,20 @@ type User struct {
 	// in store.go for why this exists as a narrow, explicit exception
 	// rather than a general "disable 2FA" switch.
 	TOTPExempt bool
-	CreatedAt  string
+	// ReadOnly blocks every mutating request this account makes — see the
+	// users table's own schema comment in store.go. Independent of Role and
+	// TOTPExempt: any account can be marked read-only.
+	ReadOnly  bool
+	CreatedAt string
 }
 
-const userColumns = `id, username, email, password_hash, role, totp_secret, must_change_password, totp_exempt, created_at`
+const userColumns = `id, username, email, password_hash, role, totp_secret, must_change_password, totp_exempt, read_only, created_at`
 
 func scanUser(scan func(...any) error) (*User, error) {
 	var u User
-	var mustChange, totpExempt int
+	var mustChange, totpExempt, readOnly int
 	if err := scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role,
-		&u.TOTPSecret, &mustChange, &totpExempt, &u.CreatedAt); err != nil {
+		&u.TOTPSecret, &mustChange, &totpExempt, &readOnly, &u.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrUserNotFound
 		}
@@ -55,6 +59,7 @@ func scanUser(scan func(...any) error) (*User, error) {
 	}
 	u.MustChangePassword = mustChange != 0
 	u.TOTPExempt = totpExempt != 0
+	u.ReadOnly = readOnly != 0
 	return &u, nil
 }
 
@@ -163,6 +168,14 @@ func (s *Store) SetUserTOTPSecret(id int64, secret string) error {
 // the login flow itself.
 func (s *Store) SetUserTOTPExempt(id int64, exempt bool) error {
 	_, err := s.db.Exec(`UPDATE users SET totp_exempt = ? WHERE id = ?`, boolToInt(exempt), id)
+	return err
+}
+
+// SetUserReadOnly blocks (or unblocks) every mutating request this account
+// makes — enforced centrally in auth.Protect, not by any one route, so it
+// applies uniformly the moment it's set with no other code to update.
+func (s *Store) SetUserReadOnly(id int64, readOnly bool) error {
+	_, err := s.db.Exec(`UPDATE users SET read_only = ? WHERE id = ?`, boolToInt(readOnly), id)
 	return err
 }
 

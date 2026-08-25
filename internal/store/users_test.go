@@ -156,6 +156,48 @@ func TestCreateUserWithTOTPExemptAndSetUserTOTPExempt(t *testing.T) {
 	}
 }
 
+func TestSetUserReadOnly(t *testing.T) {
+	db := open(t)
+	id, err := db.CreateUser("temporary", "", "hash", RoleFleet, false, true)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	u, err := db.GetUserByID(id)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if u.ReadOnly {
+		t.Fatalf("ReadOnly should default to false — CreateUser has no way to set it")
+	}
+
+	if err := db.SetUserReadOnly(id, true); err != nil {
+		t.Fatalf("SetUserReadOnly: %v", err)
+	}
+	u, err = db.GetUserByID(id)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if !u.ReadOnly {
+		t.Fatalf("ReadOnly should be true after SetUserReadOnly(id, true)")
+	}
+	// Independent of every other flag — flipping it must not touch role,
+	// TOTP exemption or anything else already on the row.
+	if u.Role != RoleFleet || !u.TOTPExempt {
+		t.Errorf("SetUserReadOnly must not touch other fields: %+v", u)
+	}
+
+	if err := db.SetUserReadOnly(id, false); err != nil {
+		t.Fatalf("SetUserReadOnly (clear): %v", err)
+	}
+	u, err = db.GetUserByID(id)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if u.ReadOnly {
+		t.Fatalf("ReadOnly should be false after SetUserReadOnly(id, false)")
+	}
+}
+
 func TestUserCountAndListUsers(t *testing.T) {
 	db := open(t)
 	if n, err := db.UserCount(); err != nil || n != 0 {

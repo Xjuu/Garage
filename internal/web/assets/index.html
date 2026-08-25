@@ -10,10 +10,13 @@
 </head>
 <body>
 
-<!-- Only shown when the server stamps <body data-temp="true"> — see
-     handleRoot in web.go — for a TOTP-exempt shared login. Static markup,
-     no JS needed: visibility is a pure CSS rule keyed on that attribute. -->
-<div class="temp-banner">This is a shared, temporary account — no two-factor authentication, and its password is not private to one person.</div>
+<!-- Shown only when the server stamps <body data-temp="true"> and/or
+     data-readonly="true"> — see handleRoot in web.go — for a TOTP-exempt
+     and/or read-only account. Static markup, no JS needed: each line's
+     visibility is its own pure CSS rule, so they stack independently if
+     both apply (as they do for a shared "Temporary" login). -->
+<div class="temp-banner" data-when="temp">This is a shared, temporary account — no two-factor authentication, and its password is not private to one person.</div>
+<div class="temp-banner" data-when="readonly">View-only account — nothing here can be changed, added or deleted.</div>
 
 <header class="topbar">
   <div class="topbar-inner">

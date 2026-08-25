@@ -291,6 +291,12 @@ CREATE TABLE IF NOT EXISTS users (
   -- one of them "claiming" it by being first to enroll 2FA. Everywhere else
   -- 2FA is genuinely mandatory; this is the one narrow, explicit exception.
   totp_exempt          INTEGER NOT NULL DEFAULT 0,
+  -- Blocks every mutating request (POST/PUT/PATCH/DELETE) this account
+  -- makes, enforced centrally in auth.Protect — not a role, and not tied to
+  -- totp_exempt: an ordinary admin or fleet account can be read-only too.
+  -- For a shared "Temporary" login, browsing is the whole point and nothing
+  -- it does should ever change or delete real data.
+  read_only            INTEGER NOT NULL DEFAULT 0,
   created_at           TEXT NOT NULL
 );
 `
@@ -387,6 +393,7 @@ func migrate(db *sql.DB) error {
 		},
 		"users": {
 			"totp_exempt": "ALTER TABLE users ADD COLUMN totp_exempt INTEGER NOT NULL DEFAULT 0",
+			"read_only":   "ALTER TABLE users ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0",
 		},
 	}
 	for table, added := range tables {

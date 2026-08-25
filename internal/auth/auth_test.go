@@ -385,6 +385,84 @@ func TestConfiguredReflectsLiveUserCount(t *testing.T) {
 	}
 }
 
+// authenticatedRequest builds a request carrying both the session and CSRF
+// cookies IssueSession sets, plus the matching X-CSRF-Token header — the
+// full shape a real signed-in browser sends on a mutating call, so Protect's
+// CSRF check passes and whatever it decides next (read-only or not) is what
+// is actually being tested.
+func authenticatedRequest(t *testing.T, a *Auth, userID int64, method, path string) *http.Request {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	a.IssueSession(rec, userID)
+	session := cookieFrom(t, rec, sessionCookie)
+	csrf := cookieFrom(t, rec, csrfCookie)
+
+	r := httptest.NewRequest(method, path, nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
+	r.AddCookie(&http.Cookie{Name: csrfCookie, Value: csrf})
+	r.Header.Set("X-CSRF-Token", csrf)
+	return r
+}
+
+// Protect is the actual enforcement point for ReadOnly — not any one route.
+// A read-only account's mutating requests must be refused regardless of a
+// valid session and a correct CSRF token; its GET requests must go through
+// exactly as normal ("view only" has to mean every view still works).
+func TestProtectBlocksMutatingRequestsForAReadOnlyAccount(t *testing.T) {
+	users := newFakeUsers()
+	u := users.addUser(t, "temporary", "GoldStar1234!", store.RoleFleet)
+	u.ReadOnly = true
+	a, err := New(users, filepath.Join(t.TempDir(), "session.key"), false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	reached := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true })
+	protected := a.Protect(next)
+
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		reached = false
+		rec := httptest.NewRecorder()
+		protected.ServeHTTP(rec, authenticatedRequest(t, a, u.ID, method, "/api/invoices/1"))
+		if reached {
+			t.Errorf("%s: a read-only account's mutating request reached the handler", method)
+		}
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: status = %d, want %d", method, rec.Code, http.StatusForbidden)
+		}
+	}
+
+	reached = false
+	rec := httptest.NewRecorder()
+	protected.ServeHTTP(rec, authenticatedRequest(t, a, u.ID, http.MethodGet, "/api/invoices"))
+	if !reached {
+		t.Fatalf("GET: a read-only account's read request should still reach the handler")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET: status = %d, want 200 (net effect of an unwritten header)", rec.Code)
+	}
+}
+
+// The counterpart: an ordinary (non-read-only) account's mutating request,
+// carrying a valid CSRF token, must pass straight through.
+func TestProtectAllowsMutatingRequestsForAnOrdinaryAccount(t *testing.T) {
+	users := newFakeUsers()
+	u := users.addUser(t, "faz", "correct horse battery staple", store.RoleFleet)
+	a, err := New(users, filepath.Join(t.TempDir(), "session.key"), false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	reached := false
+	protected := a.Protect(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true }))
+	rec := httptest.NewRecorder()
+	protected.ServeHTTP(rec, authenticatedRequest(t, a, u.ID, http.MethodPost, "/api/invoices/1"))
+	if !reached {
+		t.Fatalf("an ordinary account's mutating request should reach the handler")
+	}
+}
+
 // A TOTP-exempt account — a deliberately shared "Temporary" login — signs
 // straight in on the password alone: Login issues a real session directly,
 // with no pending cookie and no 2FA step, unlike every other account.

@@ -1,13 +1,15 @@
-/* The "temporary account" banner has no JS behind it at all — visibility is
- * a pure CSS rule keyed on <body data-temp="true">, which web.go's
- * handleRoot stamps only for a TOTP-exempt account's session (see
+/* The "temporary account" and "read-only" banners have no JS behind them at
+ * all — visibility is a pure CSS rule per line, keyed on <body data-temp="true">
+ * and <body data-readonly="true"> respectively, which web.go's handleRoot
+ * stamps for a TOTP-exempt and/or read-only account's session (see
  * data-role's own identical pattern, added earlier for role gating). This
- * checks the two halves of that contract statically: the markup exists and
- * says what it's for, and the CSS actually hides it by default and shows it
- * only under body[data-temp="true"].
+ * checks both halves of that contract statically: each line's markup exists
+ * and says what it's for, and the CSS hides each by default and shows only
+ * the one whose attribute is present — independently, so both can show at
+ * once for an account that's both temp and read-only.
  *
  * Usage: node tools/temp-banner-check.cjs
- * Exits non-zero if either half is missing.
+ * Exits non-zero if any half is missing.
  */
 
 'use strict';
@@ -25,20 +27,32 @@ function ok(cond, label) {
   if (!cond) failed = true;
 }
 
-const bannerMatch = html.match(/<div class="temp-banner">([^<]*)<\/div>/);
-ok(!!bannerMatch, 'index.html has a .temp-banner element');
-ok(!!bannerMatch && /temporary/i.test(bannerMatch[1]),
-  'its text actually says "temporary": ' + JSON.stringify(bannerMatch && bannerMatch[1]));
+function bannerLine(when) {
+  const re = new RegExp(`<div class="temp-banner" data-when="${when}">([^<]*)</div>`);
+  return html.match(re);
+}
 
-// It must sit outside every element that only renders for a signed-in
-// session's data — i.e. it's in the always-present static markup, not
+const temp = bannerLine('temp');
+ok(!!temp, 'index.html has a temp-banner line for data-when="temp"');
+ok(!!temp && /temporary/i.test(temp[1]),
+  'its text actually says "temporary": ' + JSON.stringify(temp && temp[1]));
+
+const readOnly = bannerLine('readonly');
+ok(!!readOnly, 'index.html has a temp-banner line for data-when="readonly"');
+ok(!!readOnly && /view.only|read.only/i.test(readOnly[1]),
+  'its text actually says view/read-only: ' + JSON.stringify(readOnly && readOnly[1]));
+
+// Both must sit outside every element that only renders for a signed-in
+// session's data — i.e. they're in the always-present static markup, not
 // something JS has to build.
 ok(html.indexOf('class="temp-banner"') < html.indexOf('id="tabs"'),
-  'the banner is static markup near the top of the page, before the nav');
+  'the banners are static markup near the top of the page, before the nav');
 
 ok(/\.temp-banner\s*\{[^}]*display:\s*none/.test(css),
-  'the banner is hidden by default (display: none)');
-ok(/body\[data-temp="true"\]\s*\.temp-banner\s*\{[^}]*display:\s*(block|flex)/.test(css),
-  'body[data-temp="true"] .temp-banner overrides that to visible');
+  'both lines are hidden by default (display: none)');
+ok(/body\[data-temp="true"\]\s*\.temp-banner\[data-when="temp"\]\s*\{[^}]*display:\s*(block|flex)/.test(css),
+  'body[data-temp="true"] shows only the "temp" line');
+ok(/body\[data-readonly="true"\]\s*\.temp-banner\[data-when="readonly"\]\s*\{[^}]*display:\s*(block|flex)/.test(css),
+  'body[data-readonly="true"] shows only the "readonly" line');
 
 process.exit(failed ? 1 : 0);
