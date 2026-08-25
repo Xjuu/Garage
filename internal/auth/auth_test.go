@@ -347,7 +347,7 @@ func TestMustChangePasswordBlocksLoginUntilReplaced(t *testing.T) {
 		t.Fatalf("BeginTOTPSetup must refuse an account that still has MustChangePassword set")
 	}
 
-	newStage, err := a.ChangePasswordPending(reqWithCookie(pendingCookie, pending), "a genuinely new password")
+	newStage, err := a.ChangePasswordPending(httptest.NewRecorder(), reqWithCookie(pendingCookie, pending), "a genuinely new password")
 	if err != nil {
 		t.Fatalf("ChangePasswordPending: %v", err)
 	}
@@ -382,5 +382,81 @@ func TestConfiguredReflectsLiveUserCount(t *testing.T) {
 	users.addUser(t, "alice", "correct horse battery staple", store.RoleAdmin)
 	if !a.Configured() {
 		t.Fatalf("Configured() should be true once an account exists")
+	}
+}
+
+// A TOTP-exempt account — a deliberately shared "Temporary" login — signs
+// straight in on the password alone: Login issues a real session directly,
+// with no pending cookie and no 2FA step, unlike every other account.
+func TestTOTPExemptAccountSkipsStraightToASession(t *testing.T) {
+	users := newFakeUsers()
+	u := users.addUser(t, "temporary", "GoldStar1234!", store.RoleFleet)
+	u.TOTPExempt = true
+	a, err := New(users, filepath.Join(t.TempDir(), "session.key"), false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	stage, err := a.Login(rec, httptest.NewRequest(http.MethodPost, "/", nil), "temporary", "GoldStar1234!")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if stage != "ok" {
+		t.Fatalf("stage = %q, want %q", stage, "ok")
+	}
+	if hasCookie(rec, pendingCookie) {
+		t.Fatalf("a TOTP-exempt account should never get a pending cookie — nothing is pending")
+	}
+	session := cookieFrom(t, rec, sessionCookie)
+	if !a.IsAuthenticated(reqWithCookie(sessionCookie, session)) {
+		t.Fatalf("Login should have issued a real, working session directly")
+	}
+
+	// A second login is exactly as immediate — this isn't a one-time
+	// allowance, the account is permanently exempt.
+	rec2 := httptest.NewRecorder()
+	stage2, err := a.Login(rec2, httptest.NewRequest(http.MethodPost, "/", nil), "temporary", "GoldStar1234!")
+	if err != nil || stage2 != "ok" || !hasCookie(rec2, sessionCookie) {
+		t.Fatalf("a second login should behave identically: stage=%q err=%v", stage2, err)
+	}
+}
+
+// A TOTP-exempt account still on a forced temporary password (an unusual
+// combination, but not one the type system rules out) must change its
+// password first — exemption from 2FA is not exemption from that.
+func TestTOTPExemptAccountStillMustChangeATemporaryPasswordFirst(t *testing.T) {
+	users := newFakeUsers()
+	u := users.addUser(t, "temporary", "GoldStar1234!", store.RoleFleet)
+	u.TOTPExempt = true
+	u.MustChangePassword = true
+	a, err := New(users, filepath.Join(t.TempDir(), "session.key"), false)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	loginRec := httptest.NewRecorder()
+	stage, err := a.Login(loginRec, httptest.NewRequest(http.MethodPost, "/", nil), "temporary", "GoldStar1234!")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if stage != "change_password" {
+		t.Fatalf("stage = %q, want %q — a temporary password still has to be replaced first", stage, "change_password")
+	}
+	if hasCookie(loginRec, sessionCookie) {
+		t.Fatalf("no session yet — the password still has to be changed")
+	}
+	pending := cookieFrom(t, loginRec, pendingCookie)
+
+	changeRec := httptest.NewRecorder()
+	newStage, err := a.ChangePasswordPending(changeRec, reqWithCookie(pendingCookie, pending), "a genuinely new password")
+	if err != nil {
+		t.Fatalf("ChangePasswordPending: %v", err)
+	}
+	if newStage != "ok" {
+		t.Fatalf("stage after changing password = %q, want %q — exempt from 2FA, so nothing else is pending", newStage, "ok")
+	}
+	if !hasCookie(changeRec, sessionCookie) {
+		t.Fatalf("ChangePasswordPending should have issued the session once the password was fixed")
 	}
 }

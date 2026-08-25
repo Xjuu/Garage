@@ -285,6 +285,12 @@ CREATE TABLE IF NOT EXISTS users (
   role                 TEXT NOT NULL DEFAULT 'admin',
   totp_secret          TEXT NOT NULL DEFAULT '',
   must_change_password INTEGER NOT NULL DEFAULT 0,
+  -- Set only via 'goldstar user-add --skip-setup' (or SetUserTOTPExempt) for
+  -- a deliberately shared login — a "Temporary" account handed out with a
+  -- fixed password, meant to be usable by more than one person without any
+  -- one of them "claiming" it by being first to enroll 2FA. Everywhere else
+  -- 2FA is genuinely mandatory; this is the one narrow, explicit exception.
+  totp_exempt          INTEGER NOT NULL DEFAULT 0,
   created_at           TEXT NOT NULL
 );
 `
@@ -378,6 +384,9 @@ func migrate(db *sql.DB) error {
 		},
 		"repairs": {
 			"engine_number": "ALTER TABLE repairs ADD COLUMN engine_number TEXT NOT NULL DEFAULT ''",
+		},
+		"users": {
+			"totp_exempt": "ALTER TABLE users ADD COLUMN totp_exempt INTEGER NOT NULL DEFAULT 0",
 		},
 	}
 	for table, added := range tables {

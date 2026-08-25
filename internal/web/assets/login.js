@@ -44,6 +44,9 @@ passwordPanel.addEventListener('submit', async (e) => {
       user: document.getElementById('user').value,
       password: document.getElementById('password').value,
     });
+    // A TOTP-exempt account (a shared "temporary" login) has nothing left
+    // to do — the server already issued a real session.
+    if (data.ok) { location.href = '/'; return; }
     await enterStage(data.stage);
   } catch (e2) {
     err.textContent = e2.message;
@@ -71,6 +74,7 @@ changeForm.addEventListener('submit', async (e) => {
   changeSubmit.textContent = 'Saving…';
   try {
     const data = await postJSON('/api/login/change-password', { password: newPassword.value });
+    if (data.ok) { location.href = '/'; return; }
     await enterStage(data.stage);
   } catch (e2) {
     changeErr.textContent = e2.message;

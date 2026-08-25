@@ -522,6 +522,17 @@ td.strong { font-weight: 700; }
 }
 .toast.action .btn:hover { background: var(--g2); }
 
+/* ── Temporary-account banner ──────────────────────────────────────────
+   Hidden by default; shown only when the server stamps
+   <body data-temp="true"> for a TOTP-exempt shared login. */
+.temp-banner {
+  display: none;
+  background: var(--flag-bg); color: var(--flag); border-bottom: 1px solid var(--flag);
+  font-size: 13px; font-weight: 700; text-align: center;
+  padding: 8px 16px;
+}
+body[data-temp="true"] .temp-banner { display: block; }
+
 /* ── Cookie notice ──────────────────────────────────────────────────── */
 
 .cookie-notice {

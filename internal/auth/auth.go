@@ -159,16 +159,19 @@ func AccountLabel(u *store.User) string {
 
 // Login validates the password for the named account and, on success,
 // issues a short-lived pending cookie identifying that account — never a
-// real session. The caller uses the returned stage to decide what to show
-// next:
+// real session, with one deliberate exception (see "ok" below). The caller
+// uses the returned stage to decide what to show next:
 //
 //	"change_password" — this account is still carrying a temporary
 //	                     password and must set a real one before anything else
 //	"setup"            — this account has never completed 2FA
 //	"verify"           — 2FA is set up; a code is needed
+//	"ok"               — nothing left to do; a real session has already
+//	                     been issued (a TOTP-exempt account with no
+//	                     password change pending — see SetUserTOTPExempt)
 //
-// A second factor is mandatory once any account exists at all — nothing here
-// grants dashboard access on its own.
+// A second factor is mandatory for every account except one narrow, explicit
+// exception — nothing here grants dashboard access on its own otherwise.
 func (a *Auth) Login(w http.ResponseWriter, r *http.Request, who, password string) (stage string, err error) {
 	ip := clientIP(r)
 	if !a.limiter.allow(ip) {
@@ -185,23 +188,40 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request, who, password strin
 	}
 	a.limiter.reset(ip)
 
+	// A TOTP-exempt account with nothing else pending (see stageFor) signs
+	// straight in on the password alone — the one deliberate exception to
+	// "Login never grants a session directly". Every other account still
+	// only ever gets a pending cookie here.
+	if stage = stageFor(u); stage == stageOK {
+		a.IssueSession(w, u.ID)
+		return stage, nil
+	}
+
 	exp := time.Now().Add(pendingTTL)
 	http.SetCookie(w, &http.Cookie{
 		Name: pendingCookie, Value: a.mint(u.ID, "pending", exp), Path: "/",
 		Expires: exp, HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteLaxMode,
 	})
-	return stageFor(u), nil
+	return stage, nil
 }
+
+// stageOK signals a login has nothing left to do — the caller has already
+// had IssueSession called for it, and should treat this exactly like a
+// successful 2FA confirmation, not like "setup" or "verify".
+const stageOK = "ok"
 
 // stageFor is the single place that decides what a pending login still
 // needs: a real password first if the current one is temporary, then 2FA
 // (setup if it has never been done, otherwise a code) — checked in that
 // order so a brand new account with neither ever skips straight to 2FA on a
-// password nobody but its creator has typed.
+// password nobody but its creator has typed. TOTPExempt accounts skip 2FA
+// entirely once their password is sorted — see SetUserTOTPExempt.
 func stageFor(u *store.User) string {
 	switch {
 	case u.MustChangePassword:
 		return "change_password"
+	case u.TOTPExempt:
+		return stageOK
 	case u.TOTPSecret == "":
 		return "setup"
 	default:
@@ -211,9 +231,10 @@ func stageFor(u *store.User) string {
 
 // ChangePasswordPending sets a real password for a still-pending login whose
 // account is required to replace its temporary one. Requires a live pending
-// cookie; does not by itself advance to a session, since the account may
-// still need 2FA next — the caller re-checks stageFor() on the fresh row.
-func (a *Auth) ChangePasswordPending(r *http.Request, newPassword string) (stage string, err error) {
+// cookie. If nothing else is pending afterward (a TOTP-exempt account,
+// stageFor's stageOK case), this issues the session itself, the same as
+// Login does above — the caller just relays whatever stage comes back.
+func (a *Auth) ChangePasswordPending(w http.ResponseWriter, r *http.Request, newPassword string) (stage string, err error) {
 	u, ok := a.PendingUser(r)
 	if !ok {
 		return "", errors.New("sign in again")
@@ -226,7 +247,11 @@ func (a *Auth) ChangePasswordPending(r *http.Request, newPassword string) (stage
 		return "", err
 	}
 	u.MustChangePassword = false
-	return stageFor(u), nil
+	stage = stageFor(u)
+	if stage == stageOK {
+		a.IssueSession(w, u.ID)
+	}
+	return stage, nil
 }
 
 // IssueSession grants the real, fully-authenticated session for the given

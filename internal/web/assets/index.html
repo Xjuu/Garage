@@ -10,6 +10,11 @@
 </head>
 <body>
 
+<!-- Only shown when the server stamps <body data-temp="true"> — see
+     handleRoot in web.go — for a TOTP-exempt shared login. Static markup,
+     no JS needed: visibility is a pure CSS rule keyed on that attribute. -->
+<div class="temp-banner">This is a shared, temporary account — no two-factor authentication, and its password is not private to one person.</div>
+
 <header class="topbar">
   <div class="topbar-inner">
     <div class="brand"><span class="brand-mark">G</span> Goldstar</div>

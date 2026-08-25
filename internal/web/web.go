@@ -332,16 +332,23 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if authed {
-		// The signed-in account's role, stamped onto <body> so app.js can
-		// gate its own nav without an extra round trip — see the GROUPS
-		// comment in app.js. Defaults to admin for "no password configured"
-		// mode, which has no real session to read a role from and is
-		// already wide open to everyone.
+		// The signed-in account's role (and whether it's a TOTP-exempt
+		// shared login), stamped onto <body> so app.js can gate its nav and
+		// show the "temporary account" banner without an extra round trip —
+		// see the GROUPS comment in app.js. Role defaults to admin for "no
+		// password configured" mode, which has no real session to read a
+		// role from and is already wide open to everyone.
 		role := store.RoleAdmin
+		temp := false
 		if u, ok := s.auth.CurrentUser(r); ok {
 			role = u.Role
+			temp = u.TOTPExempt
 		}
-		b = []byte(strings.Replace(string(b), "<body>", `<body data-role="`+role+`">`, 1))
+		attrs := `data-role="` + role + `"`
+		if temp {
+			attrs += ` data-temp="true"`
+		}
+		b = []byte(strings.Replace(string(b), "<body>", "<body "+attrs+">", 1))
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -364,9 +371,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-	// The password alone never finishes a login — see Auth.Login. "setup"
-	// means this account has never completed 2FA; "verify" means it has and
-	// a code is needed next.
+	writeStage(w, stage)
+}
+
+// writeStage renders the shared "what's next" response every login-flow
+// handler returns: {"ok":true} once Auth has actually issued a session
+// (stage "ok", from a TOTP-exempt account — see Auth.Login), otherwise
+// {"ok":false,"stage":...} for the front end's enterStage to act on.
+func writeStage(w http.ResponseWriter, stage string) {
+	if stage == "ok" {
+		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		return
+	}
 	json.NewEncoder(w).Encode(map[string]any{"ok": false, "stage": stage})
 }
 
@@ -388,15 +404,14 @@ func (s *Server) handleChangePendingPassword(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	stage, err := s.auth.ChangePasswordPending(r, body.Password)
+	stage, err := s.auth.ChangePasswordPending(w, r, body.Password)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-	// Same shape as /api/login's own response: "setup" or "verify" next,
-	// since a brand new account can need both a real password and 2FA.
-	json.NewEncoder(w).Encode(map[string]any{"ok": false, "stage": stage})
+	// Same shape as /api/login's own response — see writeStage.
+	writeStage(w, stage)
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {

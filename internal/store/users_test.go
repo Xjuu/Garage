@@ -4,7 +4,7 @@ import "testing"
 
 func TestCreateUserRoundTripsThroughGetByIDAndIdentity(t *testing.T) {
 	db := open(t)
-	id, err := db.CreateUser("Klon", "klon@example.com", "argon2id$hash", RoleAdmin, true)
+	id, err := db.CreateUser("Klon", "klon@example.com", "argon2id$hash", RoleAdmin, true, false)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -50,25 +50,25 @@ func TestGetUserByIdentityReportsNotFound(t *testing.T) {
 
 func TestCreateUserRejectsDuplicateUsername(t *testing.T) {
 	db := open(t)
-	if _, err := db.CreateUser("faz", "", "hash1", RoleAdmin, false); err != nil {
+	if _, err := db.CreateUser("faz", "", "hash1", RoleAdmin, false, false); err != nil {
 		t.Fatalf("first CreateUser: %v", err)
 	}
 	// Case-insensitively too — "Faz" and "faz" are the same account name.
-	if _, err := db.CreateUser("Faz", "", "hash2", RoleFleet, false); err == nil {
+	if _, err := db.CreateUser("Faz", "", "hash2", RoleFleet, false, false); err == nil {
 		t.Fatalf("a duplicate (case-insensitive) username should be rejected")
 	}
 }
 
 func TestCreateUserValidatesRole(t *testing.T) {
 	db := open(t)
-	if _, err := db.CreateUser("someone", "", "hash", "superuser", false); err == nil {
+	if _, err := db.CreateUser("someone", "", "hash", "superuser", false, false); err == nil {
 		t.Fatalf("an unrecognised role should be rejected, not silently stored")
 	}
 }
 
 func TestSetUserPasswordHashClearsMustChangeFlag(t *testing.T) {
 	db := open(t)
-	id, err := db.CreateUser("klon", "", "old-hash", RoleAdmin, true)
+	id, err := db.CreateUser("klon", "", "old-hash", RoleAdmin, true, false)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestSetUserPasswordHashClearsMustChangeFlag(t *testing.T) {
 
 func TestSetUserTOTPSecretAndRole(t *testing.T) {
 	db := open(t)
-	id, err := db.CreateUser("faz", "", "hash", RoleAdmin, false)
+	id, err := db.CreateUser("faz", "", "hash", RoleAdmin, false, false)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -127,16 +127,45 @@ func TestSetUserTOTPSecretAndRole(t *testing.T) {
 	}
 }
 
+func TestCreateUserWithTOTPExemptAndSetUserTOTPExempt(t *testing.T) {
+	db := open(t)
+	id, err := db.CreateUser("temporary", "", "hash", RoleFleet, false, true)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	u, err := db.GetUserByID(id)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if !u.TOTPExempt {
+		t.Errorf("TOTPExempt should be true when CreateUser is called with it")
+	}
+	if u.MustChangePassword {
+		t.Errorf("MustChangePassword should be false — CreateUser was called with false")
+	}
+
+	if err := db.SetUserTOTPExempt(id, false); err != nil {
+		t.Fatalf("SetUserTOTPExempt: %v", err)
+	}
+	u, err = db.GetUserByID(id)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if u.TOTPExempt {
+		t.Errorf("TOTPExempt should be false after SetUserTOTPExempt(id, false)")
+	}
+}
+
 func TestUserCountAndListUsers(t *testing.T) {
 	db := open(t)
 	if n, err := db.UserCount(); err != nil || n != 0 {
 		t.Fatalf("UserCount on a fresh database = (%d, %v), want (0, nil)", n, err)
 	}
 
-	if _, err := db.CreateUser("zeta", "", "h", RoleAdmin, false); err != nil {
+	if _, err := db.CreateUser("zeta", "", "h", RoleAdmin, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.CreateUser("alpha", "", "h", RoleFleet, false); err != nil {
+	if _, err := db.CreateUser("alpha", "", "h", RoleFleet, false, false); err != nil {
 		t.Fatal(err)
 	}
 

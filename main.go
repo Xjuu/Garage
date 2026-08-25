@@ -62,10 +62,13 @@ Usage:
                      Safe to run any time — a no-op once it's already hashed.
   goldstar totp-reset  Clear two-factor auth — the next login has to set it up again.
                      Use this if the device with the authenticator app is lost.
-  goldstar user-add <username> <password> <admin|fleet> [email]
+  goldstar user-add <username> <password> <admin|fleet> [email] [--skip-setup]
                      Create a dashboard account. Always starts with a forced
                      password change and 2FA setup required on its first login,
-                     whatever password is given here.
+                     whatever password is given here — unless --skip-setup is
+                     given, which signs it straight in with that exact
+                     password instead, no forced change and no 2FA, ever.
+                     Meant only for a deliberately shared login.
   goldstar user-role <username> <admin|fleet>
                      Change an existing account's role. admin reaches every
                      page; fleet is everything except Training and Admin.
@@ -320,7 +323,7 @@ func migrateLegacyAccount(cfg *config.Config, db *store.Store) error {
 	if username == "" {
 		username = "admin"
 	}
-	id, err := db.CreateUser(username, cfg.Email, cfg.PasswordHash, store.RoleAdmin, false)
+	id, err := db.CreateUser(username, cfg.Email, cfg.PasswordHash, store.RoleAdmin, false, false)
 	if err != nil {
 		return err
 	}
@@ -337,15 +340,28 @@ func migrateLegacyAccount(cfg *config.Config, db *store.Store) error {
 // The account always starts requiring a forced password change and 2FA
 // setup on its first login — whatever password is typed here to create it
 // was necessarily chosen by whoever is running this command, not by the
-// account's own owner, so it can never be treated as a real, permanent one.
+// account's own owner, so it can never be treated as a real, permanent one
+// — unless --skip-setup says otherwise (see below).
 func userAdd(db *store.Store) error {
 	if len(os.Args) < 5 {
-		return fmt.Errorf("usage: goldstar user-add <username> <password> <admin|fleet> [email]")
+		return fmt.Errorf("usage: goldstar user-add <username> <password> <admin|fleet> [email] [--skip-setup]")
 	}
 	username, password, role := os.Args[2], os.Args[3], os.Args[4]
 	email := ""
-	if len(os.Args) > 5 {
-		email = os.Args[5]
+	skipSetup := false
+	for _, a := range os.Args[5:] {
+		switch {
+		case a == "--skip-setup":
+			// The one narrow, explicit exception to "every account goes
+			// through a forced password change and mandatory 2FA": a
+			// deliberately shared login (e.g. a "Temporary" account handed
+			// out with a fixed password) where enrolling 2FA on first use
+			// would silently hand that one device permanent, exclusive
+			// ownership of an account meant for more than one person.
+			skipSetup = true
+		case email == "":
+			email = a
+		}
 	}
 	if role != store.RoleAdmin && role != store.RoleFleet {
 		return fmt.Errorf("role must be %q or %q, got %q", store.RoleAdmin, store.RoleFleet, role)
@@ -354,12 +370,16 @@ func userAdd(db *store.Store) error {
 	if err != nil {
 		return err
 	}
-	id, err := db.CreateUser(username, email, hash, role, true)
+	id, err := db.CreateUser(username, email, hash, role, !skipSetup, skipSetup)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Created account %q (role %s, id %d).\n", username, role, id)
-	fmt.Println("Its next login will be required to set a real password and then set up two-factor authentication before reaching the dashboard.")
+	if skipSetup {
+		fmt.Println("--skip-setup: it signs straight in with the password given above — no forced change, no 2FA, ever. Meant only for a deliberately shared login.")
+	} else {
+		fmt.Println("Its next login will be required to set a real password and then set up two-factor authentication before reaching the dashboard.")
+	}
 	return nil
 }
 

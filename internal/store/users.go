@@ -32,22 +32,29 @@ type User struct {
 	Role               string
 	TOTPSecret         string
 	MustChangePassword bool
-	CreatedAt          string
+	// TOTPExempt marks an account that never goes through 2FA at all — set
+	// only via CreateUser's skipSetup or SetUserTOTPExempt, for a
+	// deliberately shared login. See the users table's own schema comment
+	// in store.go for why this exists as a narrow, explicit exception
+	// rather than a general "disable 2FA" switch.
+	TOTPExempt bool
+	CreatedAt  string
 }
 
-const userColumns = `id, username, email, password_hash, role, totp_secret, must_change_password, created_at`
+const userColumns = `id, username, email, password_hash, role, totp_secret, must_change_password, totp_exempt, created_at`
 
 func scanUser(scan func(...any) error) (*User, error) {
 	var u User
-	var mustChange int
+	var mustChange, totpExempt int
 	if err := scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role,
-		&u.TOTPSecret, &mustChange, &u.CreatedAt); err != nil {
+		&u.TOTPSecret, &mustChange, &totpExempt, &u.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrUserNotFound
 		}
 		return nil, err
 	}
 	u.MustChangePassword = mustChange != 0
+	u.TOTPExempt = totpExempt != 0
 	return &u, nil
 }
 
@@ -57,7 +64,8 @@ func normalizeUsername(u string) string { return strings.ToLower(strings.TrimSpa
 // RoleFleet — anything else is almost certainly a typo, and one that would
 // otherwise fail silently: it wouldn't reject here, it would just leave an
 // account nothing in the nav-or-route gate recognises as either role.
-func (s *Store) CreateUser(username, email, passwordHash, role string, mustChangePassword bool) (int64, error) {
+// totpExempt should be false for every ordinary account — see SetUserTOTPExempt.
+func (s *Store) CreateUser(username, email, passwordHash, role string, mustChangePassword, totpExempt bool) (int64, error) {
 	username = normalizeUsername(username)
 	if username == "" {
 		return 0, fmt.Errorf("username is required")
@@ -68,9 +76,10 @@ func (s *Store) CreateUser(username, email, passwordHash, role string, mustChang
 	if role != RoleAdmin && role != RoleFleet {
 		return 0, fmt.Errorf("role must be %q or %q, got %q", RoleAdmin, RoleFleet, role)
 	}
-	res, err := s.db.Exec(`INSERT INTO users (username, email, password_hash, role, must_change_password, created_at)
-		VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-		username, strings.ToLower(strings.TrimSpace(email)), passwordHash, role, boolToInt(mustChangePassword))
+	res, err := s.db.Exec(`INSERT INTO users (username, email, password_hash, role, must_change_password, totp_exempt, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+		username, strings.ToLower(strings.TrimSpace(email)), passwordHash, role,
+		boolToInt(mustChangePassword), boolToInt(totpExempt))
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return 0, fmt.Errorf("the username %q is already taken", username)
@@ -141,6 +150,19 @@ func (s *Store) SetUserPasswordHash(id int64, hash string) error {
 // SetUserTOTPSecret records a confirmed 2FA enrollment.
 func (s *Store) SetUserTOTPSecret(id int64, secret string) error {
 	_, err := s.db.Exec(`UPDATE users SET totp_secret = ? WHERE id = ?`, strings.TrimSpace(secret), id)
+	return err
+}
+
+// SetUserTOTPExempt marks (or unmarks) an account as never needing 2FA at
+// all — Login issues a session the moment the password checks out, no
+// pending step in between. Meant for exactly one situation: a deliberately
+// shared login handed out with a fixed password, where requiring 2FA would
+// mean whoever enrolls first silently "claims" the account for their own
+// phone. Everywhere else 2FA is mandatory on purpose; this exists so that
+// exception is a visible, explicit flag on one account rather than a hole in
+// the login flow itself.
+func (s *Store) SetUserTOTPExempt(id int64, exempt bool) error {
+	_, err := s.db.Exec(`UPDATE users SET totp_exempt = ? WHERE id = ?`, boolToInt(exempt), id)
 	return err
 }
 
