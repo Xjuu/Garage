@@ -34,11 +34,15 @@ function readCookie(name) {
     stamped by the server for an account with ReadOnly set) is refused before
     the request ever goes out — the server enforces this too (auth.Protect),
     this just gives a clean, immediate message instead of a round trip that
-    was always going to come back 403. */
+    was always going to come back 403. /api/logout is the one deliberate
+    exception: signing out isn't a "change" to any data, and the server
+    itself never gates it behind Protect either (see routesFleet's sibling
+    registration in web.go) — a read-only account that couldn't reach it
+    would be stuck signed in until its cookies were cleared by hand. */
 async function api(path, opts = {}) {
   const o = { headers: {}, ...opts };
   if (o.method && o.method !== 'GET') {
-    if (document.body.dataset.readonly === 'true') {
+    if (path !== '/api/logout' && document.body.dataset.readonly === 'true') {
       throw new Error('This is a view-only account — changes are disabled.');
     }
     o.headers['X-CSRF-Token'] = readCookie('goldstar_csrf');

@@ -104,6 +104,20 @@ function ok(cond, label) {
   ok(fetchCalls.length === 1 && fetchCalls[0].url === '/api/invoices',
     'a read-only account\'s GET request still reaches fetch');
 
+  // /api/logout is a POST but must NOT be blocked — a read-only account has
+  // to be able to sign itself out, or it's stuck signed in until its
+  // cookies are cleared by hand (the actual bug this guards against).
+  fetchCalls.length = 0;
+  let logoutThrew = null;
+  try {
+    await ctx.api('/api/logout', { method: 'POST' });
+  } catch (e) {
+    logoutThrew = e;
+  }
+  ok(logoutThrew === null, 'a read-only account can still call /api/logout: ' + (logoutThrew && logoutThrew.message));
+  ok(fetchCalls.length === 1 && fetchCalls[0].url === '/api/logout',
+    '/api/logout actually reaches fetch for a read-only account');
+
   // ── an ordinary (non-read-only) body: mutating calls go through fine ──
   delete body.dataset.readonly;
   fetchCalls.length = 0;
