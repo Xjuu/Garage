@@ -16,6 +16,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"math/big"
 	"os"
 	"os/signal"
 	"strings"
@@ -69,6 +70,13 @@ Usage:
                      Change an existing account's role. admin reaches every
                      page; fleet is everything except Training and Admin.
   goldstar user-list  List dashboard accounts and their role / 2FA status.
+  goldstar user-passwd <username> [password]
+                     Set an account's password directly — no old password
+                     needed, unlike the Admin page's own change-password
+                     form. With no password given, generates a random
+                     256-character one (every letter, digit and UK-keyboard
+                     special character) and prints it once; nothing else
+                     stores it. The account's 2FA, if any, is untouched.
   goldstar doctor    Check configuration and connectivity without changing anything
   goldstar models    List the Gemini models this API key can call
 
@@ -281,6 +289,8 @@ func realMain(cmd string) error {
 		return userRole(db)
 	case "user-list":
 		return userList(db)
+	case "user-passwd":
+		return userPasswd(db)
 	default:
 		fmt.Println(usage)
 		return fmt.Errorf("unknown command %q", cmd)
@@ -390,6 +400,76 @@ func userList(db *store.Store) error {
 		}
 		fmt.Printf("%-20s role=%-6s %s%s\n", u.Username, u.Role, totp, change)
 	}
+	return nil
+}
+
+// passwordCharset is every upper- and lower-case letter, digit, and the
+// special characters a standard UK English keyboard actually types (the
+// shifted number row plus the other punctuation keys) — used only by the
+// random generator below, not by HashPassword's own validation, which
+// accepts anything at least 10 characters long.
+const passwordCharset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
+	"abcdefghijklmnopqrstuvwxyz" +
+	"0123456789" +
+	"!\"£$%^&*()_+-=[]{};:'@#~,.<>/?\\|`"
+
+// randomPassword picks n characters uniformly from passwordCharset using
+// crypto/rand — rejection-free, since big.Int's bound already avoids the
+// modulo bias a plain `% len` would introduce. Built as []rune, not indexed
+// as a plain string: £ is two bytes in UTF-8, and byte-indexing would slice
+// straight through the middle of it.
+func randomPassword(n int) (string, error) {
+	runes := []rune(passwordCharset)
+	bound := big.NewInt(int64(len(runes)))
+	out := make([]rune, n)
+	for i := range out {
+		idx, err := rand.Int(rand.Reader, bound)
+		if err != nil {
+			return "", err
+		}
+		out[i] = runes[idx.Int64()]
+	}
+	return string(out), nil
+}
+
+// userPasswd is `goldstar user-passwd <username> [password]` — sets an
+// account's password directly. Unlike the Admin page's own change-password
+// form, this needs no current password: the whole point is being usable
+// when nobody has one to give, whether that's a lockout or just a
+// deliberate rotation.
+func userPasswd(db *store.Store) error {
+	if len(os.Args) < 3 {
+		return fmt.Errorf("usage: goldstar user-passwd <username> [password]")
+	}
+	u, err := db.GetUserByIdentity(os.Args[2])
+	if err != nil {
+		return fmt.Errorf("no such account %q", os.Args[2])
+	}
+
+	password := ""
+	if len(os.Args) > 3 {
+		password = os.Args[3]
+	} else {
+		password, err = randomPassword(256)
+		if err != nil {
+			return fmt.Errorf("generate password: %w", err)
+		}
+	}
+
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return err
+	}
+	if err := db.SetUserPasswordHash(u.ID, hash); err != nil {
+		return err
+	}
+
+	if len(os.Args) > 3 {
+		fmt.Printf("Password for %q has been changed.\n", u.Username)
+	} else {
+		fmt.Printf("New password for %q (shown once — save it now):\n\n%s\n\n", u.Username, password)
+	}
+	fmt.Println("Existing sessions on every device stay signed in — delete data/session.key (and data/repairs-session.key for the repairs site too) and restart if you also need to force a fresh sign-in everywhere.")
 	return nil
 }
 
