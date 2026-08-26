@@ -210,6 +210,32 @@
     </div></div>
   </section>
 
+  <!-- Makes -->
+  <section class="view" id="view-makes">
+    <div class="view-head"><h2>Makes</h2>
+      <span class="sub">Spend by manufacturer, and by make &amp; model beneath it — a model priced well
+        above the rest of its own make is flagged.</span></div>
+
+    <div class="panel" style="padding:16px 18px;margin-bottom:22px"><div id="make-bars"></div></div>
+
+    <div class="section-title">By make</div>
+    <div class="panel" style="margin-bottom:26px"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Make</th><th class="num">Vehicles</th><th class="num">Invoices</th>
+        <th class="num">Net</th><th class="num">VAT</th><th class="num">Gross</th><th class="num">Avg / vehicle</th>
+      </tr></thead><tbody id="make-rows"></tbody></table>
+    </div></div>
+
+    <div class="section-title">By make &amp; model</div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Make</th><th>Model</th><th class="num">Vehicles</th><th class="num">Invoices</th>
+        <th class="num">Net</th><th class="num">VAT</th><th class="num">Gross</th>
+        <th class="num">Avg / vehicle</th><th class="num">vs make avg</th>
+      </tr></thead><tbody id="model-rows"></tbody></table>
+    </div></div>
+  </section>
+
   <!-- Parts -->
   <section class="view" id="view-parts">
     <div class="view-head"><h2>Parts</h2>

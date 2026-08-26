@@ -139,6 +139,7 @@ func (s *Server) Listen(ctx context.Context, addr string) error {
 	api.HandleFunc("GET /api/vehicles", s.json(s.vehicles))
 	api.HandleFunc("GET /api/suppliers", s.json(s.suppliers))
 	api.HandleFunc("GET /api/parts", s.json(s.parts))
+	api.HandleFunc("GET /api/makes", s.json(s.makes))
 	api.HandleFunc("GET /api/months", s.json(s.months))
 	api.HandleFunc("GET /api/filters", s.json(s.filters))
 	api.HandleFunc("GET /api/search", s.json(s.globalSearch))
@@ -472,6 +473,21 @@ func (s *Server) vehicles(r *http.Request) (any, error)  { return s.db.Vehicles(
 func (s *Server) suppliers(r *http.Request) (any, error) { return s.db.Suppliers() }
 func (s *Server) parts(r *http.Request) (any, error)     { return s.db.Parts() }
 func (s *Server) months(r *http.Request) (any, error)    { return s.db.Months() }
+
+// makes backs the Makes tab: totals by manufacturer alongside the finer
+// make+model breakdown, in one request so the page never shows one table
+// without the other.
+func (s *Server) makes(r *http.Request) (any, error) {
+	makes, err := s.db.Makes()
+	if err != nil {
+		return nil, err
+	}
+	models, err := s.db.Models()
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"makes": makes, "models": models}, nil
+}
 
 // invoiceFile serves the original attachment straight off disk. Every invoice
 // is kept locally when it is first ingested, so opening one costs nothing and

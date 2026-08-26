@@ -377,6 +377,122 @@ func (s *Store) Vehicles() ([]VehicleAgg, error) {
 	return out, rows.Err()
 }
 
+type MakeAgg struct {
+	Make          string  `json:"make"`
+	Vehicles      int     `json:"vehicles"`
+	Invoices      int     `json:"invoices"`
+	Netto         float64 `json:"netto"`
+	VAT           float64 `json:"vat"`
+	Brutto        float64 `json:"brutto"`
+	// AvgPerVehicle is Brutto / Vehicles — the fair way to compare makes
+	// with very different fleet sizes against each other; a make with ten
+	// cars will always out-total one with two, but that alone says nothing
+	// about which is actually the more expensive car to run.
+	AvgPerVehicle float64 `json:"avg_per_vehicle"`
+}
+
+// Makes totals spend by manufacturer, across every model — "which make of
+// car costs me the most" answered independently of "which specific model".
+func (s *Store) Makes() ([]MakeAgg, error) {
+	rows, err := s.db.Query(`
+		SELECT v.make,
+		       COUNT(DISTINCT i.vehicle_reg),
+		       COUNT(DISTINCT i.id),
+		       COALESCE(SUM(i.netto),0), COALESCE(SUM(i.vat_amount),0), COALESCE(SUM(i.brutto),0)
+		FROM invoices i
+		JOIN vehicles v ON v.registration = i.vehicle_reg
+		WHERE i.vehicle_reg <> '' AND v.make <> ''
+		GROUP BY v.make
+		ORDER BY SUM(i.brutto) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []MakeAgg{}
+	for rows.Next() {
+		var m MakeAgg
+		if err := rows.Scan(&m.Make, &m.Vehicles, &m.Invoices, &m.Netto, &m.VAT, &m.Brutto); err != nil {
+			return nil, err
+		}
+		if m.Vehicles > 0 {
+			m.AvgPerVehicle = m.Brutto / float64(m.Vehicles)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+type ModelAgg struct {
+	Make          string  `json:"make"`
+	Model         string  `json:"model"`
+	Vehicles      int     `json:"vehicles"`
+	Invoices      int     `json:"invoices"`
+	Netto         float64 `json:"netto"`
+	VAT           float64 `json:"vat"`
+	Brutto        float64 `json:"brutto"`
+	AvgPerVehicle float64 `json:"avg_per_vehicle"`
+	// MakeAvgPerVehicle is that make's own AvgPerVehicle across ALL its
+	// models (see Makes) — the yardstick PctAboveMakeAvg is measured
+	// against, so the front end can flag a model as the expensive one
+	// within its own make without a second request to cross-reference.
+	MakeAvgPerVehicle float64 `json:"make_avg_per_vehicle"`
+	// PctAboveMakeAvg is how much this model's own average-per-vehicle
+	// exceeds its make's overall average — positive means this specific
+	// model is costing more than the make's other models; 0 or negative
+	// means it's at or below what's typical for the make. Always 0 for a
+	// make with only one model on file: there's nothing else of that make
+	// to compare it against.
+	PctAboveMakeAvg float64 `json:"pct_above_make_avg"`
+}
+
+// Models totals spend by make AND model, and — the actual point of
+// separating this from Makes — measures each model against its own make's
+// average, so "this Transit costs way more than the rest of our Fords" is a
+// number, not something you have to eyeball out of two separate tables.
+func (s *Store) Models() ([]ModelAgg, error) {
+	makes, err := s.Makes()
+	if err != nil {
+		return nil, err
+	}
+	makeAvg := make(map[string]float64, len(makes))
+	for _, m := range makes {
+		makeAvg[m.Make] = m.AvgPerVehicle
+	}
+
+	rows, err := s.db.Query(`
+		SELECT v.make, v.model,
+		       COUNT(DISTINCT i.vehicle_reg),
+		       COUNT(DISTINCT i.id),
+		       COALESCE(SUM(i.netto),0), COALESCE(SUM(i.vat_amount),0), COALESCE(SUM(i.brutto),0)
+		FROM invoices i
+		JOIN vehicles v ON v.registration = i.vehicle_reg
+		WHERE i.vehicle_reg <> '' AND v.make <> '' AND v.model <> ''
+		GROUP BY v.make, v.model
+		ORDER BY SUM(i.brutto) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []ModelAgg{}
+	for rows.Next() {
+		var m ModelAgg
+		if err := rows.Scan(&m.Make, &m.Model, &m.Vehicles, &m.Invoices, &m.Netto, &m.VAT, &m.Brutto); err != nil {
+			return nil, err
+		}
+		if m.Vehicles > 0 {
+			m.AvgPerVehicle = m.Brutto / float64(m.Vehicles)
+		}
+		m.MakeAvgPerVehicle = makeAvg[m.Make]
+		if m.MakeAvgPerVehicle > 0 {
+			m.PctAboveMakeAvg = (m.AvgPerVehicle - m.MakeAvgPerVehicle) / m.MakeAvgPerVehicle * 100
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 type SupplierAgg struct {
 	Supplier string  `json:"supplier"`
 	Invoices int     `json:"invoices"`

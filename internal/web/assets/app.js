@@ -159,6 +159,7 @@ const GROUPS = [
     views: [
       ['spending', 'Spending'],
       ['vehicles', 'Vehicles', 'c-vehicles'],
+      ['makes', 'Makes'],
       ['parts', 'Parts', 'c-parts'],
       ['suppliers', 'Suppliers', 'c-suppliers'],
       ['vat', 'VAT'],
@@ -648,9 +649,11 @@ const TOP_SHORTCUT_KEYS = Object.fromEntries(TOP_SHORTCUTS.map(([k, view]) => [k
 //   Spending  → S is global (Sync)                        → E (spEnding)
 //   Suppliers → S is global, U is global                   → L (suppLiers)
 //   VAT       → V is Vehicles' (the more central one keeps it) → A (vAt)
+//   Makes     → M is free, nothing else in this group wants it → M
 const SECTION_SHORTCUTS = {
   analysis: [
     ['v', 'vehicles', 'Vehicles'],
+    ['m', 'makes', 'Makes'],
     ['p', 'parts', 'Parts'],
     ['e', 'spending', 'Spending'],
     ['l', 'suppliers', 'Suppliers'],
@@ -780,6 +783,59 @@ $('d-delete').addEventListener('click', async () => {
 });
 
 // ── aggregate views ───────────────────────────────────────────────────────
+
+// A model has to actually cost meaningfully more, not just nudge over its
+// make's average by rounding noise, before it's worth calling out — one
+// invoice's difference on a make with few vehicles can swing this a few
+// percent either way without meaning anything.
+const MODEL_FLAG_THRESHOLD_PCT = 20;
+
+async function loadMakes() {
+  const seq = beginLoad('makes');
+  const data = await api('/api/makes');
+  if (stale('makes', seq)) return;
+  const { makes, models } = data;
+
+  drawChart('make-bars', makes.map((m) => ({
+    label: m.make,
+    value: m.brutto,
+    title: `${m.make} — £${money(m.brutto)} across ${int(m.vehicles)} vehicle(s)`,
+  })));
+
+  $('make-rows').innerHTML = makes.length
+    ? makes.map((m) => `
+        <tr>
+          <td class="strong">${esc(m.make)}</td>
+          <td class="num">${int(m.vehicles)}</td>
+          <td class="num">${int(m.invoices)}</td>
+          <td class="num">${money(m.netto)}</td>
+          <td class="num">${money(m.vat)}</td>
+          <td class="num strong">${money(m.brutto)}</td>
+          <td class="num">${money(m.avg_per_vehicle)}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="7" class="empty">No makes on file yet — set a make on a vehicle in Fleet.</td></tr>';
+
+  $('model-rows').innerHTML = models.length
+    ? models.map((m) => {
+        const flagged = m.pct_above_make_avg > MODEL_FLAG_THRESHOLD_PCT;
+        const sign = m.pct_above_make_avg > 0 ? '+' : '';
+        return `
+        <tr>
+          <td>${esc(m.make)}</td>
+          <td class="strong">${esc(m.model)}</td>
+          <td class="num">${int(m.vehicles)}</td>
+          <td class="num">${int(m.invoices)}</td>
+          <td class="num">${money(m.netto)}</td>
+          <td class="num">${money(m.vat)}</td>
+          <td class="num strong">${money(m.brutto)}</td>
+          <td class="num">${money(m.avg_per_vehicle)}</td>
+          <td class="num">${flagged
+            ? `<span class="pill flag" title="${sign}${m.pct_above_make_avg.toFixed(0)}% vs the rest of ${esc(m.make)}">${sign}${m.pct_above_make_avg.toFixed(0)}%</span>`
+            : `${sign}${m.pct_above_make_avg.toFixed(0)}%`}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="9" class="empty">No make &amp; model data yet</td></tr>';
+}
 
 async function loadVehicles() {
   const seq = beginLoad('vehicles');
@@ -1057,6 +1113,7 @@ Object.assign(viewLoaders, {
   overview: loadOverview,
   invoices: loadInvoices,
   vehicles: loadVehicles,
+  makes: loadMakes,
   parts: loadParts,
   suppliers: loadSuppliers,
   vat: loadVAT,
