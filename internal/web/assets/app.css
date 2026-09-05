@@ -23,6 +23,14 @@
   --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
           system-ui, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* The shortcuts bar's own fixed height, pinned to the bottom of the
+     viewport (see .shortcuts-bar) — everything else that also floats at
+     the bottom of the page (toasts, the job console, the cookie notice)
+     reads this one variable to stack above it instead of getting covered.
+     Reset to 0 on the mobile breakpoint below, where the bar disappears
+     entirely and nothing needs to make room for it any more. */
+  --shortcuts-h: 45px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -145,7 +153,12 @@ nav.tabs .count {
   font-size: 11px; font-weight: 700;
 }
 
-main { max-width: 1500px; margin: 0 auto; padding: var(--pad); }
+/* Bottom padding leaves room for the fixed shortcuts bar (see
+   .shortcuts-bar) so it never sits over the last bit of a page's content. */
+main {
+  max-width: 1500px; margin: 0 auto;
+  padding: var(--pad) var(--pad) calc(var(--pad) + var(--shortcuts-h));
+}
 
 .view { display: none; }
 .view.active { display: block; }
@@ -447,7 +460,8 @@ td.strong { font-weight: 700; }
 /* ── Job console ────────────────────────────────────────────────────── */
 
 .console {
-  position: fixed; right: 20px; bottom: 20px; z-index: 90;
+  /* Stacks just above the shortcuts bar — see --shortcuts-h. */
+  position: fixed; right: 20px; bottom: calc(var(--shortcuts-h) + 20px); z-index: 90;
   width: min(560px, calc(100vw - 40px));
   background: var(--paper); border: 1px solid var(--g2);
   border-radius: var(--radius); box-shadow: var(--shadow);
@@ -495,7 +509,8 @@ td.strong { font-weight: 700; }
 /* ── Toast ──────────────────────────────────────────────────────────── */
 
 .toasts {
-  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  /* Stacks just above the shortcuts bar — see --shortcuts-h. */
+  position: fixed; left: 50%; bottom: calc(var(--shortcuts-h) + 24px); transform: translateX(-50%);
   z-index: 200; display: flex; flex-direction: column; gap: 8px;
   align-items: center; pointer-events: none;
 }
@@ -538,7 +553,10 @@ body[data-readonly="true"] .temp-banner[data-when="readonly"] { display: block; 
 /* ── Cookie notice ──────────────────────────────────────────────────── */
 
 .cookie-notice {
-  position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 250;
+  /* Stacks just above the shortcuts bar rather than under it — see
+     --shortcuts-h, which is 0 below the mobile breakpoint, where the
+     shortcuts bar doesn't exist and this sits at the usual 16px again. */
+  position: fixed; left: 16px; right: 16px; bottom: calc(var(--shortcuts-h) + 16px); z-index: 250;
   max-width: 560px; margin: 0 auto;
   background: var(--paper); border: 1px solid var(--g2);
   border-radius: var(--radius); box-shadow: var(--shadow);
@@ -767,15 +785,23 @@ input.pin-hidden-input:focus { outline: none; }
 }
 
 /* Always visible for the same reason the search hint is: a shortcut nobody
-   discovers is not a feature, it's dead code with a keydown listener. Its
-   own row rather than squeezed into the already-full search bar, so it
-   never has to compete with the date fields for room and never needs a
-   scrollbar of its own. */
+   discovers is not a feature, it's dead code with a keydown listener.
+   Pinned to the bottom of the viewport rather than sitting in the header's
+   own flow, so it reads as permanent chrome — always in the same place —
+   instead of scrolling away with the page. One row, never wrapping: a
+   second line would make its own height unpredictable, which is exactly
+   what --shortcuts-h (and everything that stacks above it) depends on
+   staying fixed. Whatever doesn't fit scrolls horizontally instead —
+   same technique nav.tabs already uses for the same reason. */
 .shortcuts-bar {
-  max-width: 1500px; margin: 0 auto;
-  padding: 0 var(--pad) 12px;
-  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 120;
+  height: var(--shortcuts-h);
+  background: var(--paper); border-top: 1px solid var(--g2);
+  padding: 0 var(--pad);
+  display: flex; gap: 8px; align-items: center;
+  flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
 }
+.shortcuts-bar::-webkit-scrollbar { display: none; }
 .shortcuts-bar .chip {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 11px;
@@ -822,8 +848,14 @@ input.pin-hidden-input:focus { outline: none; }
 
 /* Keyboard shortcuts have no audience on a touchscreen, so this is one of
    the few things that simply disappears below the mobile breakpoint rather
-   than reflowing — there is no smaller version of "press a key" to show. */
+   than reflowing — there is no smaller version of "press a key" to show.
+   Resetting --shortcuts-h to 0 here is what actually gives that space
+   back: main's bottom padding and every other bottom-fixed element
+   (toasts, the job console, the cookie notice) read that one variable, so
+   this single reset is enough to un-reserve the room for all of them at
+   once — nothing to individually re-tune per element on this breakpoint. */
 @media (max-width: 720px) {
+  :root { --shortcuts-h: 0px; }
   .shortcuts-bar { display: none; }
 }
 

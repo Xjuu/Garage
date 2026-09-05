@@ -56,21 +56,6 @@
     </div>
     <div class="omni-results" id="omni-results" role="listbox" hidden></div>
   </div>
-  <div class="shortcuts-bar" aria-label="Keyboard shortcuts">
-    <span class="chip"><kbd>/</kbd> Search</span>
-    <span class="chip"><kbd>S</kbd> Sync mailbox</span>
-    <span class="chip"><kbd>U</kbd> Upload</span>
-    <span class="chip"><kbd>G</kbd> Generate spreadsheet</span>
-    <span class="chip"><kbd>1</kbd> Overview</span>
-    <span class="chip"><kbd>2</kbd> Invoices</span>
-    <span class="chip"><kbd>3</kbd> Analysis</span>
-    <span class="chip"><kbd>4</kbd> Setup</span>
-    <span class="chip"><kbd>Esc</kbd> Back</span>
-    <!-- Filled in by renderSectionShortcuts() with the current section's own
-         subtab shortcuts (Analysis, Setup) — empty and invisible everywhere
-         else, since Overview and Invoices have no subtabs to jump between. -->
-    <span class="section-shortcuts" id="section-shortcuts"></span>
-  </div>
   <nav class="tabs" role="tablist" id="tabs"></nav>
   <div class="subtabs" id="subtabs"></div>
 </header>
@@ -681,6 +666,25 @@
     </div>
   </section>
 </main>
+
+<!-- Pinned to the bottom of the viewport (see .shortcuts-bar in app.css) —
+     page-level chrome, not part of the header, so it stays in the same
+     place regardless of scroll position or which view is open. -->
+<div class="shortcuts-bar" aria-label="Keyboard shortcuts">
+  <span class="chip"><kbd>/</kbd> Search</span>
+  <span class="chip"><kbd>S</kbd> Sync mailbox</span>
+  <span class="chip"><kbd>U</kbd> Upload</span>
+  <span class="chip"><kbd>G</kbd> Generate spreadsheet</span>
+  <span class="chip"><kbd>1</kbd> Overview</span>
+  <span class="chip"><kbd>2</kbd> Invoices</span>
+  <span class="chip"><kbd>3</kbd> Analysis</span>
+  <span class="chip"><kbd>4</kbd> Setup</span>
+  <span class="chip"><kbd>Esc</kbd> Back</span>
+  <!-- Filled in by renderSectionShortcuts() with the current section's own
+       subtab shortcuts (Analysis, Setup) — empty and invisible everywhere
+       else, since Overview and Invoices have no subtabs to jump between. -->
+  <span class="section-shortcuts" id="section-shortcuts"></span>
+</div>
 
 <!-- Invoice detail -->
 <div class="scrim" id="scrim"></div>
