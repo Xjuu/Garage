@@ -20,7 +20,6 @@
   <div class="topbar-inner">
     <div class="brand"><span class="brand-mark">R</span> Goldstar Rentals</div>
     <div class="spacer"></div>
-    <button class="btn solid" id="btn-new-hire">New hire</button>
     <button class="btn" id="btn-logout" title="Sign out">Sign out</button>
   </div>
   <nav class="tabs" role="tablist" id="tabs">
@@ -32,26 +31,27 @@
 </header>
 
 <main>
-  <!-- Today -->
+  <!-- The board: what can go out, and what is already with someone -->
   <section class="view active" id="view-today">
-    <div class="view-head"><h2>Today</h2>
-      <span class="sub">What is out, what is late, and what is free right now.</span></div>
+    <div class="view-head">
+      <h2>Rentals</h2>
+      <span class="sub" id="board-sub"></span>
+      <div class="spacer"></div>
+      <button class="btn solid" id="btn-add-car">+ Add a loan car</button>
+    </div>
+
     <div class="tiles" id="today-tiles"></div>
 
-    <div class="section-title">Out now</div>
-    <div class="panel"><div class="table-scroll">
-      <table><thead><tr>
-        <th>Customer</th><th>Car</th><th>Out since</th><th>Due back</th>
-        <th class="num">Days</th><th class="num">Total</th><th></th>
-      </tr></thead><tbody id="out-rows"></tbody></table>
-    </div></div>
-
-    <div class="section-title">Starting soon</div>
-    <div class="panel"><div class="table-scroll">
-      <table><thead><tr>
-        <th>Customer</th><th>Car</th><th>From</th><th>Until</th><th></th>
-      </tr></thead><tbody id="upcoming-rows"></tbody></table>
-    </div></div>
+    <div class="board">
+      <div>
+        <div class="section-title">Free to lend <span class="count-plain" id="free-count">0</span></div>
+        <div class="panel" id="free-panel"></div>
+      </div>
+      <div>
+        <div class="section-title">Out with customers <span class="count-plain" id="out-count">0</span></div>
+        <div class="panel" id="out-panel"></div>
+      </div>
+    </div>
   </section>
 
   <!-- Hires -->
@@ -147,45 +147,120 @@
   </section>
 </main>
 
-<!-- New hire -->
 <div class="scrim" id="scrim"></div>
-<aside class="drawer" id="hire-drawer" aria-hidden="true">
-  <div class="drawer-head">
-    <h3>New hire</h3>
+
+<!-- Lend this car out -->
+<div class="modal" id="lend-modal" aria-hidden="true" role="dialog" aria-label="Lend this car out">
+  <div class="modal-head">
+    <h3>Lend this car out</h3>
     <div class="spacer"></div>
-    <button class="btn sm" id="hire-close">Close</button>
+    <button class="modal-x" id="lend-close" aria-label="Close">×</button>
   </div>
-  <div class="drawer-body">
-    <div class="section-title">1 · Dates</div>
+  <div class="modal-body">
+    <div class="chosen-car" id="lend-car"></div>
+
+    <div class="field"><label for="l-customer">Who is taking it? <span class="req">*</span></label>
+      <select id="l-customer"><option value="">— choose a customer —</option></select></div>
+
+    <div class="field"><label for="l-back">Back on <span class="req">*</span></label>
+      <input type="date" id="l-back"></div>
+
+    <!-- Everything below is detail that only matters at the counter, so it
+         stays out of the way until someone actually wants it. -->
+    <button class="more-toggle" id="lend-more" aria-expanded="false">
+      + While their car is in for repair, mileage, notes</button>
+    <div id="lend-extra" hidden>
+      <div class="field"><label for="l-courtesy-yn">Is this while their own car is being repaired?</label>
+        <select id="l-courtesy-yn">
+          <option value="no">No — just a loan</option>
+          <option value="yes">Yes — courtesy car</option>
+        </select></div>
+      <div class="field" id="l-courtesy-wrap" hidden>
+        <label for="l-courtesy">Their car (registration)</label>
+        <input type="text" id="l-courtesy" placeholder="AB12 CDE" autocomplete="off"></div>
+      <div class="field"><label for="l-mileage">Mileage now</label>
+        <input type="number" id="l-mileage" min="0" step="1"></div>
+      <div class="field"><label for="l-note">Anything to note?</label>
+        <textarea id="l-note" rows="3"></textarea>
+        <span class="field-hint">Existing damage, fuel level.</span></div>
+    </div>
+
+    <div class="login-err" id="lend-err" role="alert"></div>
+  </div>
+  <div class="modal-foot">
+    <button class="btn" id="lend-cancel">Cancel</button>
+    <button class="btn solid" id="lend-save">Lend it out</button>
+  </div>
+</div>
+
+<!-- Add one of our cars -->
+<div class="modal" id="car-modal" aria-hidden="true" role="dialog" aria-label="Add one of our cars">
+  <div class="modal-head">
+    <h3>Add one of our cars</h3>
+    <div class="spacer"></div>
+    <button class="modal-x" id="car-close" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="field"><label for="c-reg">Registration <span class="req">*</span></label>
+      <input type="text" id="c-reg" placeholder="AB12 CDE" autocomplete="off"></div>
     <div class="grid2">
-      <div class="field"><label for="h-from">From</label>
-        <input type="date" id="h-from"></div>
-      <div class="field"><label for="h-to">Until</label>
-        <input type="date" id="h-to"></div>
+      <div class="field"><label for="c-make">Make <span class="req">*</span></label>
+        <input type="text" id="c-make" autocomplete="off"></div>
+      <div class="field"><label for="c-model">Model <span class="req">*</span></label>
+        <input type="text" id="c-model" autocomplete="off"></div>
     </div>
-    <div class="hire-hint" id="h-dates-hint">Pick both dates to see which cars are free.</div>
+    <div class="field"><label for="c-status">Can it go out?</label>
+      <select id="c-status">
+        <option value="available">Yes — free to lend</option>
+        <option value="maintenance">Not right now — in for work</option>
+        <option value="retired">No — retired</option>
+      </select></div>
 
-    <div class="section-title">2 · Car</div>
-    <div class="field">
-      <select id="h-car"><option value="">— pick dates first —</option></select>
+    <button class="more-toggle" id="car-more" aria-expanded="false">+ More details</button>
+    <div id="car-extra" hidden>
+      <div class="grid2">
+        <div class="field"><label for="c-year">Year</label>
+          <input type="text" id="c-year" placeholder="2020" autocomplete="off"></div>
+        <div class="field"><label for="c-colour">Colour</label>
+          <input type="text" id="c-colour" autocomplete="off"></div>
+        <div class="field"><label for="c-mileage">Mileage</label>
+          <input type="number" id="c-mileage" min="0" step="1"></div>
+        <div class="field"><label for="c-mot">MOT runs out</label>
+          <input type="date" id="c-mot"></div>
+      </div>
+      <div class="field"><label for="c-rate">Day rate (£)</label>
+        <input type="number" id="c-rate" min="0" step="0.01"></div>
+      <div class="field"><label for="c-notes">Notes</label>
+        <textarea id="c-notes" rows="3"></textarea></div>
     </div>
 
-    <div class="section-title">3 · Customer</div>
-    <div class="field">
-      <select id="h-customer"><option value="">— choose a customer —</option></select>
-    </div>
-    <div class="hire-hint">No account yet? Add them under Customers first.</div>
-
-    <div class="section-title">Notes</div>
-    <div class="field"><input type="text" id="h-notes" placeholder="optional" autocomplete="off"></div>
-
-    <div class="hire-total" id="h-total"></div>
-    <div class="login-err" id="h-err" role="alert"></div>
+    <div class="login-err" id="car-err" role="alert"></div>
   </div>
-  <div class="drawer-foot">
-    <button class="btn solid" id="h-save">Book it</button>
+  <div class="modal-foot">
+    <button class="btn" id="car-cancel">Cancel</button>
+    <button class="btn solid" id="car-save">Save</button>
   </div>
-</aside>
+</div>
+
+<!-- Bring a car back -->
+<div class="modal" id="back-modal" aria-hidden="true" role="dialog" aria-label="Bring this car back">
+  <div class="modal-head">
+    <h3>Bring this car back</h3>
+    <div class="spacer"></div>
+    <button class="modal-x" id="back-close" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="chosen-car" id="back-car"></div>
+    <div class="field"><label for="b-mileage">Mileage now</label>
+      <input type="number" id="b-mileage" min="0" step="1">
+      <span class="field-hint">Leave blank to keep the reading it went out on.</span></div>
+    <div class="login-err" id="back-err" role="alert"></div>
+  </div>
+  <div class="modal-foot">
+    <button class="btn" id="back-cancel">Cancel</button>
+    <button class="btn solid" id="back-save">It's back</button>
+  </div>
+</div>
 
 <div class="toasts" id="toasts"></div>
 

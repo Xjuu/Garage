@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Rental agreement statuses. Only StatusBooked and StatusOut hold a car
@@ -152,17 +153,21 @@ type RentalVehicle struct {
 	Year         string  `json:"year"`
 	Colour       string  `json:"colour"`
 	DailyRate    float64 `json:"daily_rate"`
+	Mileage      float64 `json:"mileage"`
+	MOTExpires   string  `json:"mot_expires"`
 	Status       string  `json:"status"`
 	Notes        string  `json:"notes"`
 	CreatedAt    string  `json:"created_at"`
 }
 
-const rentalVehicleCols = `id, registration, make, model, year, colour, daily_rate, status, notes, created_at`
+const rentalVehicleCols = `id, registration, make, model, year, colour, daily_rate,
+	mileage, mot_expires, status, notes, created_at`
 
 func scanRentalVehicle(scan func(...any) error) (*RentalVehicle, error) {
 	var v RentalVehicle
 	if err := scan(&v.ID, &v.Registration, &v.Make, &v.Model, &v.Year,
-		&v.Colour, &v.DailyRate, &v.Status, &v.Notes, &v.CreatedAt); err != nil {
+		&v.Colour, &v.DailyRate, &v.Mileage, &v.MOTExpires, &v.Status,
+		&v.Notes, &v.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &v, nil
@@ -194,10 +199,12 @@ func (s *Store) AddRentalVehicle(v RentalVehicle) (int64, error) {
 		return 0, fmt.Errorf("daily rate cannot be negative")
 	}
 	res, err := s.db.Exec(`INSERT INTO rental_vehicles
-		(registration, make, model, year, colour, daily_rate, status, notes, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		(registration, make, model, year, colour, daily_rate, mileage, mot_expires,
+		 status, notes, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
 		reg, strings.TrimSpace(v.Make), strings.TrimSpace(v.Model), strings.TrimSpace(v.Year),
-		strings.TrimSpace(v.Colour), v.DailyRate, v.Status, v.Notes)
+		strings.TrimSpace(v.Colour), v.DailyRate, v.Mileage, strings.TrimSpace(v.MOTExpires),
+		v.Status, v.Notes)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return 0, fmt.Errorf("%s is already in the rental pool", reg)
@@ -220,10 +227,11 @@ func (s *Store) UpdateRentalVehicle(id int64, v RentalVehicle) error {
 	}
 	_, err := s.db.Exec(`UPDATE rental_vehicles
 		SET registration = ?, make = ?, model = ?, year = ?, colour = ?,
-		    daily_rate = ?, status = ?, notes = ?
+		    daily_rate = ?, mot_expires = ?, status = ?, notes = ?
 		WHERE id = ?`,
 		reg, strings.TrimSpace(v.Make), strings.TrimSpace(v.Model), strings.TrimSpace(v.Year),
-		strings.TrimSpace(v.Colour), v.DailyRate, v.Status, v.Notes, id)
+		strings.TrimSpace(v.Colour), v.DailyRate, strings.TrimSpace(v.MOTExpires),
+		v.Status, v.Notes, id)
 	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
 		return fmt.Errorf("%s is already in the rental pool", reg)
 	}
@@ -274,16 +282,18 @@ func (s *Store) DeleteRentalVehicle(id int64) error {
 // RentalAgreement is one hire, as written. See RentalAgreementView for the
 // same row joined to the names a screen actually needs.
 type RentalAgreement struct {
-	ID         int64   `json:"id"`
-	VehicleID  int64   `json:"vehicle_id"`
-	CustomerID int64   `json:"customer_id"`
-	StartsOn   string  `json:"starts_on"`
-	EndsOn     string  `json:"ends_on"`
-	ReturnedOn string  `json:"returned_on"`
-	Status     string  `json:"status"`
-	DailyRate  float64 `json:"daily_rate"`
-	Notes      string  `json:"notes"`
-	CreatedAt  string  `json:"created_at"`
+	ID             int64   `json:"id"`
+	VehicleID      int64   `json:"vehicle_id"`
+	CustomerID     int64   `json:"customer_id"`
+	StartsOn       string  `json:"starts_on"`
+	EndsOn         string  `json:"ends_on"`
+	ReturnedOn     string  `json:"returned_on"`
+	Status         string  `json:"status"`
+	DailyRate      float64 `json:"daily_rate"`
+	MileageOut     float64 `json:"mileage_out"`
+	CourtesyForReg string  `json:"courtesy_for_reg"`
+	Notes          string  `json:"notes"`
+	CreatedAt      string  `json:"created_at"`
 }
 
 // RentalAgreementView is what every list screen wants: the hire plus who
@@ -304,7 +314,7 @@ type RentalAgreementView struct {
 
 const rentalAgreementView = `
 	SELECT a.id, a.vehicle_id, a.customer_id, a.starts_on, a.ends_on, a.returned_on,
-	       a.status, a.daily_rate, a.notes, a.created_at,
+	       a.status, a.daily_rate, a.mileage_out, a.courtesy_for_reg, a.notes, a.created_at,
 	       c.name, c.phone, v.registration, v.make, v.model,
 	       CAST(julianday(a.ends_on) - julianday(a.starts_on) AS INTEGER) + 1
 	FROM rental_agreements a
@@ -314,7 +324,7 @@ const rentalAgreementView = `
 func scanRentalAgreementView(scan func(...any) error) (*RentalAgreementView, error) {
 	var a RentalAgreementView
 	if err := scan(&a.ID, &a.VehicleID, &a.CustomerID, &a.StartsOn, &a.EndsOn, &a.ReturnedOn,
-		&a.Status, &a.DailyRate, &a.Notes, &a.CreatedAt,
+		&a.Status, &a.DailyRate, &a.MileageOut, &a.CourtesyForReg, &a.Notes, &a.CreatedAt,
 		&a.CustomerName, &a.Phone, &a.Registration, &a.Make, &a.Model, &a.Days); err != nil {
 		return nil, err
 	}
@@ -397,9 +407,11 @@ func (s *Store) CreateRentalAgreement(a RentalAgreement) (int64, error) {
 	}
 
 	res, err := tx.Exec(`INSERT INTO rental_agreements
-		(vehicle_id, customer_id, starts_on, ends_on, status, daily_rate, notes, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		a.VehicleID, a.CustomerID, a.StartsOn, a.EndsOn, a.Status, a.DailyRate, a.Notes)
+		(vehicle_id, customer_id, starts_on, ends_on, status, daily_rate,
+		 mileage_out, courtesy_for_reg, notes, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		a.VehicleID, a.CustomerID, a.StartsOn, a.EndsOn, a.Status, a.DailyRate,
+		a.MileageOut, NormalizeReg(a.CourtesyForReg), a.Notes)
 	if err != nil {
 		return 0, err
 	}
@@ -567,4 +579,146 @@ func (s *Store) RentalOverview() (*RentalOverview, error) {
 		return nil, err
 	}
 	return o, nil
+}
+
+// LendCar is the counter action the whole hire desk turns on: this car,
+// this customer, back on this date, handed over now. It is deliberately not
+// CreateRentalAgreement with today's date filled in — the difference is
+// that a car being lent out is going out of the door as the button is
+// pressed, so it starts today, opens as 'out' rather than 'booked', and
+// takes the odometer reading and any damage note that only exist at the
+// moment the keys change hands.
+//
+// courtesyForReg, when set, is the customer's OWN car sitting in the
+// workshop — what makes this a courtesy car rather than a plain hire.
+func (s *Store) LendCar(vehicleID, customerID int64, backOn string, mileageNow float64,
+	courtesyForReg, note string) (int64, error) {
+	if !isoDate(backOn) {
+		return 0, fmt.Errorf("a date for bringing it back is required")
+	}
+	today := time.Now().Format("2006-01-02")
+	if backOn < today {
+		return 0, fmt.Errorf("the return date has already passed")
+	}
+	if mileageNow < 0 {
+		return 0, fmt.Errorf("mileage cannot be negative")
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var status string
+	var rate, onTheClock float64
+	if err := tx.QueryRow(`SELECT status, daily_rate, mileage FROM rental_vehicles WHERE id = ?`,
+		vehicleID).Scan(&status, &rate, &onTheClock); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("no such loan car")
+		}
+		return 0, err
+	}
+	if status != RentalAvailable {
+		return 0, fmt.Errorf("that car is marked %s and cannot go out", status)
+	}
+
+	// An odometer only goes up. Same guard the repairs site applies to a
+	// service visit, for the same reason: the reading is almost always a
+	// typo rather than a car that has travelled backwards.
+	if mileageNow > 0 && mileageNow < onTheClock {
+		return 0, fmt.Errorf("mileage cannot be lower than the %g already recorded for this car", onTheClock)
+	}
+
+	var clash int
+	if err := tx.QueryRow(`SELECT COUNT(1) FROM rental_agreements
+		WHERE vehicle_id = ? AND `+rentalHoldsCar+`
+		  AND starts_on <= ? AND ends_on >= ?`,
+		vehicleID, backOn, today).Scan(&clash); err != nil {
+		return 0, err
+	}
+	if clash > 0 {
+		return 0, fmt.Errorf("that car is already out or booked over those dates")
+	}
+
+	res, err := tx.Exec(`INSERT INTO rental_agreements
+		(vehicle_id, customer_id, starts_on, ends_on, status, daily_rate,
+		 mileage_out, courtesy_for_reg, notes, created_at)
+		VALUES (?, ?, ?, ?, 'out', ?, ?, ?, ?, datetime('now'))`,
+		vehicleID, customerID, today, backOn, rate,
+		mileageNow, NormalizeReg(courtesyForReg), strings.TrimSpace(note))
+	if err != nil {
+		return 0, err
+	}
+	// The reading taken at the counter is the car's mileage from now on —
+	// otherwise the figure on the forecourt list drifts further from
+	// reality with every loan.
+	if mileageNow > 0 {
+		if _, err := tx.Exec(`UPDATE rental_vehicles SET mileage = ? WHERE id = ?`,
+			mileageNow, vehicleID); err != nil {
+			return 0, err
+		}
+	}
+
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return id, tx.Commit()
+}
+
+// BringCarBack closes a loan and records the odometer as it came in.
+func (s *Store) BringCarBack(agreementID int64, mileageIn float64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var vehicleID int64
+	var onTheClock float64
+	if err := tx.QueryRow(`SELECT a.vehicle_id, v.mileage
+		FROM rental_agreements a JOIN rental_vehicles v ON v.id = a.vehicle_id
+		WHERE a.id = ?`, agreementID).Scan(&vehicleID, &onTheClock); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("no such loan")
+		}
+		return err
+	}
+	if mileageIn > 0 && mileageIn < onTheClock {
+		return fmt.Errorf("mileage cannot be lower than the %g already recorded for this car", onTheClock)
+	}
+
+	if _, err := tx.Exec(`UPDATE rental_agreements
+		SET status = 'returned', returned_on = date('now') WHERE id = ?`, agreementID); err != nil {
+		return err
+	}
+	if mileageIn > 0 {
+		if _, err := tx.Exec(`UPDATE rental_vehicles SET mileage = ? WHERE id = ?`,
+			mileageIn, vehicleID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// RentalBoard is the hire desk's front page: the two columns it is made of.
+// Free to lend is every car that could go out of the door right now —
+// available, and not already spoken for today.
+type RentalBoard struct {
+	Free []RentalVehicle       `json:"free"`
+	Out  []RentalAgreementView `json:"out"`
+}
+
+func (s *Store) RentalBoard() (*RentalBoard, error) {
+	today := time.Now().Format("2006-01-02")
+	free, err := s.AvailableRentalVehicles(today, today)
+	if err != nil {
+		return nil, err
+	}
+	out, err := s.RentalAgreements(RentalAgreementsFilter{Status: RentalOut})
+	if err != nil {
+		return nil, err
+	}
+	return &RentalBoard{Free: free, Out: out}, nil
 }

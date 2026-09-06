@@ -38,6 +38,9 @@ func (s *Server) rentalsRoutes(sub fs.FS) http.Handler {
 	// mutating call, and a read-only account blocked from changing anything.
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/rentals/overview", s.json(s.rentalsOverview))
+	api.HandleFunc("GET /api/rentals/board", s.json(s.rentalBoard))
+	api.HandleFunc("POST /api/rentals/lend", s.json(s.lendCar))
+	api.HandleFunc("POST /api/rentals/agreements/{id}/back", s.json(s.bringCarBack))
 
 	api.HandleFunc("GET /api/rentals/customers", s.json(s.rentalCustomers))
 	api.HandleFunc("POST /api/rentals/customers", s.json(s.addRentalCustomer))
@@ -72,6 +75,50 @@ func (s *Server) handleRentalsRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) rentalsOverview(r *http.Request) (any, error) { return s.db.RentalOverview() }
+
+func (s *Server) rentalBoard(r *http.Request) (any, error) { return s.db.RentalBoard() }
+
+// lendCar is the counter's one-click action: this car, this customer, back
+// on this date. Everything else on the form is optional detail that only
+// exists at the moment the keys change hands.
+func (s *Server) lendCar(r *http.Request) (any, error) {
+	var body struct {
+		VehicleID      int64   `json:"vehicle_id"`
+		CustomerID     int64   `json:"customer_id"`
+		BackOn         string  `json:"back_on"`
+		MileageNow     float64 `json:"mileage_now"`
+		CourtesyForReg string  `json:"courtesy_for_reg"`
+		Note           string  `json:"note"`
+	}
+	if err := decode(r, &body); err != nil {
+		return nil, err
+	}
+	id, err := s.db.LendCar(body.VehicleID, body.CustomerID, body.BackOn,
+		body.MileageNow, body.CourtesyForReg, body.Note)
+	if err != nil {
+		// A car already out, or a reading below the odometer, is a refusal
+		// rather than a malformed request — 409, shown to the desk as itself.
+		return nil, fail(http.StatusConflict, "%v", err)
+	}
+	return map[string]any{"id": id}, nil
+}
+
+func (s *Server) bringCarBack(r *http.Request) (any, error) {
+	id, err := pathID(r)
+	if err != nil {
+		return nil, err
+	}
+	var body struct {
+		MileageIn float64 `json:"mileage_in"`
+	}
+	if err := decode(r, &body); err != nil {
+		return nil, err
+	}
+	if err := s.db.BringCarBack(id, body.MileageIn); err != nil {
+		return nil, fail(http.StatusConflict, "%v", err)
+	}
+	return okResponse(), nil
+}
 
 // ── customers ─────────────────────────────────────────────────────────────
 

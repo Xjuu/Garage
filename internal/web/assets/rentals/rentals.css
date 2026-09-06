@@ -62,3 +62,100 @@ tbody tr.row-muted td { color: var(--g4); }
    inside a cell (a customer's name above their number), which that
    selector doesn't reach. */
 .strong { font-weight: 700; }
+
+/* ── The board ───────────────────────────────────────────────────────────
+   Free to lend beside out with customers: the two questions the desk has,
+   answerable without scrolling past one to reach the other. Stacks below
+   the tablet width, where side by side leaves neither column readable. */
+.board {
+  display: grid; gap: 22px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+}
+@media (max-width: 900px) { .board { grid-template-columns: 1fr; } }
+
+.board .panel { overflow: hidden; }
+
+/* A car on the forecourt: plate, what it is, and the one action. Not a
+   table — there are three facts and a button, and a table's columns would
+   be mostly empty space around them. */
+.car-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 14px; border-bottom: 1px solid var(--g1);
+}
+.car-row:last-child { border-bottom: 0; }
+.car-row .reg { flex-shrink: 0; }
+.car-what { min-width: 0; flex: 1; }
+.car-name {
+  font-weight: 700; font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.car-row .car-sub {
+  display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  margin-top: 2px; font-size: 12px; color: var(--g4);
+}
+.car-row .btn { flex-shrink: 0; }
+.car-row.row-flag { background: var(--flag-bg); }
+
+.empty-box {
+  padding: 34px 18px; text-align: center; color: var(--g4); font-size: 13px;
+}
+.empty-box strong { display: block; color: var(--ink); font-size: 15px; margin-bottom: 4px; }
+
+/* The count beside a section heading, in the heading's own weight rather
+   than the .count pill the nav uses for a badge. */
+.count-plain { color: var(--g4); font-weight: 400; }
+
+/* ── Modals ──────────────────────────────────────────────────────────────
+   The dashboard's drawer slides in from the side for reading a record;
+   these are short forms that want to be in the middle of the screen and
+   dismissed, so they are their own thing rather than a drawer wearing a
+   different width. */
+.modal {
+  position: fixed; z-index: 101;
+  left: 50%; top: 50%; transform: translate(-50%, -48%) scale(.98);
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  background: var(--paper); border: 1px solid var(--g2);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  display: none; flex-direction: column;
+}
+.modal.open { display: flex; transform: translate(-50%, -50%) scale(1); }
+
+.modal-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 18px; border-bottom: 1px solid var(--g2);
+}
+.modal-head h3 { font-size: 16px; }
+.modal-body { padding: 18px; overflow-y: auto; }
+.modal-body .field { margin-bottom: 14px; }
+.modal-foot {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 14px 18px; border-top: 1px solid var(--g2);
+}
+.modal-x {
+  background: none; border: 0; cursor: pointer;
+  font-size: 20px; line-height: 1; color: var(--g4); padding: 2px 6px;
+}
+.modal-x:hover { color: var(--ink); }
+
+/* Which car this form is about, restated at the top so nobody has to
+   remember which button they pressed. */
+.chosen-car {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 13px; margin-bottom: 18px;
+  background: var(--g05); border: 1px solid var(--g2); border-radius: var(--radius-sm);
+  font-weight: 700; font-size: 14px;
+}
+
+/* The expander that keeps a form short. Reads as a link rather than a
+   button: pressing it reveals fields, it does not do anything. */
+.more-toggle {
+  background: none; border: 0; cursor: pointer; padding: 2px 0;
+  font-size: 13px; font-weight: 600; color: var(--g5);
+  margin-bottom: 14px;
+}
+.more-toggle:hover { color: var(--ink); }
+
+.req { color: var(--flag); }
+.field-hint { display: block; margin-top: 5px; font-size: 12px; color: var(--g4); }

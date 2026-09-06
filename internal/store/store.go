@@ -329,6 +329,8 @@ CREATE TABLE IF NOT EXISTS rental_vehicles (
   year         TEXT NOT NULL DEFAULT '',
   colour       TEXT NOT NULL DEFAULT '',
   daily_rate   REAL NOT NULL DEFAULT 0,
+  mileage      REAL NOT NULL DEFAULT 0,
+  mot_expires  TEXT NOT NULL DEFAULT '',
   -- available | maintenance | retired. Only 'available' cars can be booked;
   -- the other two exist so a car off the road stops being offered without
   -- having to delete it and lose its hire history.
@@ -355,6 +357,11 @@ CREATE TABLE IF NOT EXISTS rental_agreements (
   -- Snapshotted from the vehicle when the hire is created, so re-pricing the
   -- car later never silently rewrites what an existing agreement was worth.
   daily_rate  REAL NOT NULL DEFAULT 0,
+  -- The odometer as the keys were handed over, and — when this is a
+  -- courtesy car rather than a plain hire — the registration of the
+  -- customer's own car sitting in the workshop.
+  mileage_out REAL NOT NULL DEFAULT 0,
+  courtesy_for_reg TEXT NOT NULL DEFAULT '',
   notes       TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL
 );
@@ -497,6 +504,14 @@ func migrate(db *sql.DB) error {
 		},
 		"repairs": {
 			"engine_number": "ALTER TABLE repairs ADD COLUMN engine_number TEXT NOT NULL DEFAULT ''",
+		},
+		"rental_vehicles": {
+			"mileage":     "ALTER TABLE rental_vehicles ADD COLUMN mileage REAL NOT NULL DEFAULT 0",
+			"mot_expires": "ALTER TABLE rental_vehicles ADD COLUMN mot_expires TEXT NOT NULL DEFAULT ''",
+		},
+		"rental_agreements": {
+			"mileage_out":      "ALTER TABLE rental_agreements ADD COLUMN mileage_out REAL NOT NULL DEFAULT 0",
+			"courtesy_for_reg": "ALTER TABLE rental_agreements ADD COLUMN courtesy_for_reg TEXT NOT NULL DEFAULT ''",
 		},
 		"users": {
 			"totp_exempt": "ALTER TABLE users ADD COLUMN totp_exempt INTEGER NOT NULL DEFAULT 0",

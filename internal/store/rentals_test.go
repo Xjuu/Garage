@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // customer + car, the two things every hire needs, as a one-liner so the
 // tests below read as what they are actually about.
@@ -368,5 +371,147 @@ func TestRentalOverviewCounts(t *testing.T) {
 	// 5 days at 45 for the one that's out.
 	if o.OutValue != 225 {
 		t.Errorf("OutValue = %v, want 225", o.OutValue)
+	}
+}
+
+// The counter action: this car, this person, back on this date, gone now.
+func TestLendCarPutsItOutTodayAndTracksTheOdometer(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	backOn := time.Now().AddDate(0, 0, 5).Format("2006-01-02")
+
+	id, err := db.LendCar(vehicleID, customerID, backOn, 12500, "", "scuff on the nearside")
+	if err != nil {
+		t.Fatalf("LendCar: %v", err)
+	}
+
+	a, err := db.RentalAgreement(id)
+	if err != nil {
+		t.Fatalf("RentalAgreement: %v", err)
+	}
+	// It went out of the door as the button was pressed, so it is already
+	// out rather than booked for later.
+	if a.Status != RentalOut {
+		t.Errorf("Status = %q, want %q", a.Status, RentalOut)
+	}
+	if a.StartsOn != time.Now().Format("2006-01-02") {
+		t.Errorf("StartsOn = %q, want today", a.StartsOn)
+	}
+	if a.MileageOut != 12500 || a.Notes != "scuff on the nearside" {
+		t.Errorf("the counter reading and note were not kept: %+v", a)
+	}
+
+	// The reading taken at the counter becomes the car's mileage.
+	v, _ := db.RentalVehicle(vehicleID)
+	if v.Mileage != 12500 {
+		t.Errorf("car Mileage = %v, want the 12500 read at the counter", v.Mileage)
+	}
+
+	// And the car is off the forecourt.
+	board, err := db.RentalBoard()
+	if err != nil {
+		t.Fatalf("RentalBoard: %v", err)
+	}
+	if len(board.Free) != 0 {
+		t.Errorf("a car that is out should not be free to lend, got %d", len(board.Free))
+	}
+	if len(board.Out) != 1 || board.Out[0].CustomerName != "Alex Rider" {
+		t.Errorf("the out column should name who has it: %+v", board.Out)
+	}
+}
+
+func TestLendCarValidates(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	backOn := time.Now().AddDate(0, 0, 3).Format("2006-01-02")
+
+	if _, err := db.LendCar(vehicleID, customerID, "", 0, "", ""); err == nil {
+		t.Error("a loan with no return date should be refused")
+	}
+	if _, err := db.LendCar(vehicleID, customerID, yesterday, 0, "", ""); err == nil {
+		t.Error("a return date in the past should be refused")
+	}
+	if _, err := db.LendCar(9999, customerID, backOn, 0, "", ""); err == nil {
+		t.Error("lending a car that does not exist should be refused")
+	}
+
+	// Two people cannot have the same car.
+	if _, err := db.LendCar(vehicleID, customerID, backOn, 0, "", ""); err != nil {
+		t.Fatalf("LendCar: %v", err)
+	}
+	if _, err := db.LendCar(vehicleID, customerID, backOn, 0, "", ""); err == nil {
+		t.Error("lending a car that is already out should be refused")
+	}
+}
+
+// An odometer only goes up — the same guard the repairs site applies to a
+// service visit, and for the same reason.
+func TestLendAndReturnRefuseMileageGoingBackwards(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	backOn := time.Now().AddDate(0, 0, 3).Format("2006-01-02")
+
+	id, err := db.LendCar(vehicleID, customerID, backOn, 30000, "", "")
+	if err != nil {
+		t.Fatalf("LendCar: %v", err)
+	}
+	if err := db.BringCarBack(id, 29000); err == nil {
+		t.Error("a lower reading on return should be refused")
+	}
+	if err := db.BringCarBack(id, 30450); err != nil {
+		t.Fatalf("BringCarBack: %v", err)
+	}
+
+	v, _ := db.RentalVehicle(vehicleID)
+	if v.Mileage != 30450 {
+		t.Errorf("car Mileage = %v, want the 30450 it came back on", v.Mileage)
+	}
+	a, _ := db.RentalAgreement(id)
+	if a.Status != RentalReturned || a.ReturnedOn == "" {
+		t.Errorf("the loan should be closed and dated: %+v", a)
+	}
+
+	// Back on the forecourt for the next customer.
+	board, _ := db.RentalBoard()
+	if len(board.Free) != 1 || len(board.Out) != 0 {
+		t.Errorf("a returned car should be free again: %d free, %d out", len(board.Free), len(board.Out))
+	}
+
+	// A second loan cannot start below the reading it came back on.
+	if _, err := db.LendCar(vehicleID, customerID, backOn, 30100, "", ""); err == nil {
+		t.Error("lending out below the recorded mileage should be refused")
+	}
+}
+
+// A courtesy car records which of the customer's own cars is in the
+// workshop — the thing that makes it a courtesy car rather than a hire.
+func TestCourtesyCarRecordsTheCarItIsStandingInFor(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	backOn := time.Now().AddDate(0, 0, 3).Format("2006-01-02")
+
+	id, err := db.LendCar(vehicleID, customerID, backOn, 0, "ab12 cde", "")
+	if err != nil {
+		t.Fatalf("LendCar: %v", err)
+	}
+	a, _ := db.RentalAgreement(id)
+	// Normalised the same way every other registration in this system is,
+	// so it joins to the workshop's own records.
+	if a.CourtesyForReg != "AB12CDE" {
+		t.Errorf("CourtesyForReg = %q, want the normalised %q", a.CourtesyForReg, "AB12CDE")
+	}
+
+	// A plain loan leaves it empty rather than inventing a car.
+	if err := db.BringCarBack(id, 0); err != nil {
+		t.Fatal(err)
+	}
+	id2, err := db.LendCar(vehicleID, customerID, backOn, 0, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a2, _ := db.RentalAgreement(id2)
+	if a2.CourtesyForReg != "" {
+		t.Errorf("CourtesyForReg = %q, want empty for a plain loan", a2.CourtesyForReg)
 	}
 }

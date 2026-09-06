@@ -81,7 +81,9 @@ const state = {
   view: 'today',
   hireStatus: '',
   customers: [],
-  cars: [],
+  cars: [],      // what is free to lend right now, as the board last saw it
+  lending: null, // the car the lend modal is about
+  returning: null,
 };
 
 // ── navigation ────────────────────────────────────────────────────────────
@@ -122,73 +124,76 @@ const carLabel = (a) =>
   `<span class="mono strong">${esc(a.registration)}</span>` +
   (a.make || a.model ? `<span class="car-sub">${esc([a.make, a.model].filter(Boolean).join(' '))}</span>` : '');
 
+/** The forecourt: one row per car that could go out right now, and one per
+    car that is already with someone. This is the whole hire desk — the
+    other tabs are for looking things up afterwards. */
 async function loadToday() {
-  const [o, out, upcoming] = await Promise.all([
+  const [o, board] = await Promise.all([
     api('/api/rentals/overview'),
-    api('/api/rentals/agreements?status=out'),
-    api('/api/rentals/agreements?status=booked'),
+    api('/api/rentals/board'),
   ]);
+  state.cars = board.free;
 
-  const tiles = [
+  $('board-sub').textContent =
+    `${board.free.length} free to lend · ${board.out.length} out with customers`;
+  $('free-count').textContent = `(${board.free.length})`;
+  $('out-count').textContent = `(${board.out.length})`;
+
+  $('today-tiles').innerHTML = [
     { k: 'Out now', v: o.out_now },
     { k: 'Overdue', v: o.overdue, alert: o.overdue > 0 },
     { k: 'Due back today', v: o.due_today },
-    { k: 'Free to hire', v: o.available, m: `of ${o.fleet} car(s)` },
+    { k: 'Free to lend', v: o.available, m: `of ${o.fleet} car(s)` },
     { k: 'Value on hire', v: '£' + money(o.out_value) },
-  ];
-  $('today-tiles').innerHTML = tiles.map((t) => `
+  ].map((t) => `
     <div class="tile${t.alert ? ' alert' : ''}">
-      <div class="k">${esc(t.k)}</div>
-      <div class="v">${typeof t.v === 'number' ? t.v : t.v}</div>
+      <div class="k">${esc(t.k)}</div><div class="v">${esc(t.v)}</div>
       ${t.m ? `<div class="m">${esc(t.m)}</div>` : ''}
     </div>`).join('');
 
-  $('out-rows').innerHTML = out.length
-    ? out.map((a) => `
-        <tr class="${isOverdue(a) ? 'row-flag' : ''}">
-          <td><span class="strong">${esc(a.customer_name)}</span>
-              ${a.phone ? `<span class="car-sub mono">${esc(a.phone)}</span>` : ''}</td>
-          <td>${carLabel(a)}</td>
-          <td class="mono">${esc(ukDate(a.starts_on))}</td>
-          <td class="mono">${esc(ukDate(a.ends_on))} ${isOverdue(a) ? statusPill(a) : ''}</td>
-          <td class="num">${a.days}</td>
-          <td class="num strong">£${money(a.total)}</td>
-          <td class="num"><button class="btn sm" data-return="${a.id}">Returned</button></td>
-        </tr>`).join('')
-    : '<tr><td colspan="7" class="empty">No cars out right now</td></tr>';
+  $('free-panel').innerHTML = board.free.length
+    ? board.free.map((v) => `
+        <div class="car-row">
+          <span class="reg">${esc(v.registration)}</span>
+          <div class="car-what">
+            <div class="car-name">${esc([v.make, v.model].filter(Boolean).join(' ')) || '—'}</div>
+            <div class="car-sub">${carSub(v)}</div>
+          </div>
+          <button class="btn solid sm" data-lend="${v.id}">Lend it out</button>
+        </div>`).join('')
+    : '<div class="empty-box"><strong>No cars free</strong>Every loan car is out, or none has been added yet.</div>';
 
-  $('upcoming-rows').innerHTML = upcoming.length
-    ? upcoming.map((a) => `
-        <tr>
-          <td><span class="strong">${esc(a.customer_name)}</span></td>
-          <td>${carLabel(a)}</td>
-          <td class="mono">${esc(ukDate(a.starts_on))}</td>
-          <td class="mono">${esc(ukDate(a.ends_on))}</td>
-          <td class="num"><button class="btn sm solid" data-pickup="${a.id}">Picked up</button></td>
-        </tr>`).join('')
-    : '<tr><td colspan="5" class="empty">Nothing booked ahead</td></tr>';
+  $('out-panel').innerHTML = board.out.length
+    ? board.out.map((a) => `
+        <div class="car-row ${isOverdue(a) ? 'row-flag' : ''}">
+          <span class="reg">${esc(a.registration)}</span>
+          <div class="car-what">
+            <div class="car-name">${esc(a.customer_name)}</div>
+            <div class="car-sub">
+              ${esc([a.make, a.model].filter(Boolean).join(' '))} ·
+              back ${esc(ukDate(a.ends_on))}
+              ${isOverdue(a) ? '<span class="pill flag">Overdue</span>' : ''}
+              ${a.courtesy_for_reg ? `<span class="pill">Courtesy for ${esc(a.courtesy_for_reg)}</span>` : ''}
+            </div>
+          </div>
+          <button class="btn sm" data-back="${a.id}" data-label="${esc(a.registration)} · ${esc(a.customer_name)}">It's back</button>
+        </div>`).join('')
+    : '<div class="empty-box">Every loan car is back on the forecourt.</div>';
 
-  wireAgreementButtons();
+  document.querySelectorAll('[data-lend]').forEach((b) =>
+    b.addEventListener('click', () => openLend(b.dataset.lend)));
+  document.querySelectorAll('[data-back]').forEach((b) =>
+    b.addEventListener('click', () => openBack(b.dataset.back, b.dataset.label)));
 }
 
-/** The two buttons that move a hire along, wired wherever they appear —
-    Today lists them, Hires lists them again, and both want identical
-    behaviour rather than two copies of it. */
-function wireAgreementButtons() {
-  document.querySelectorAll('[data-pickup]').forEach((b) =>
-    b.addEventListener('click', () => setStatus(b.dataset.pickup, 'out', 'Marked as picked up')));
-  document.querySelectorAll('[data-return]').forEach((b) =>
-    b.addEventListener('click', () => setStatus(b.dataset.return, 'returned', 'Marked as returned')));
-  document.querySelectorAll('[data-cancel]').forEach((b) =>
-    b.addEventListener('click', () => setStatus(b.dataset.cancel, 'cancelled', 'Hire cancelled')));
-}
-
-async function setStatus(id, status, msg) {
-  try {
-    await api(`/api/rentals/agreements/${id}/status`, { method: 'PATCH', json: { status } });
-    toast(msg);
-    show(state.view);
-  } catch (e) { toast(e.message, true); }
+/** Colour and what is on the clock — the two things that tell one otherwise
+    identical Corolla from another on a forecourt list. */
+function carSub(v) {
+  const bits = [];
+  if (v.colour) bits.push(esc(v.colour));
+  bits.push(`${Math.round(v.mileage || 0).toLocaleString('en-GB')} mi`);
+  if (v.daily_rate) bits.push(`£${money(v.daily_rate)}/day`);
+  return bits.join(' · ');
 }
 
 // ── hires ─────────────────────────────────────────────────────────────────
@@ -357,108 +362,177 @@ $('ncu-add').addEventListener('click', async () => {
   }
 });
 
-// ── new hire ──────────────────────────────────────────────────────────────
+// ── modals ────────────────────────────────────────────────────────────────
 
-function openHire() {
-  $('h-from').value = $('h-from').value || todayISO();
-  $('h-to').value = $('h-to').value || todayISO();
-  $('h-err').textContent = '';
+function openModal(id) {
   $('scrim').classList.add('open');
-  $('hire-drawer').classList.add('open');
-  $('hire-drawer').setAttribute('aria-hidden', 'false');
-  loadHireCustomers();
-  refreshAvailable();
+  $(id).classList.add('open');
+  $(id).setAttribute('aria-hidden', 'false');
 }
 
-function closeHire() {
+function closeModals() {
   $('scrim').classList.remove('open');
-  $('hire-drawer').classList.remove('open');
-  $('hire-drawer').setAttribute('aria-hidden', 'true');
+  ['lend-modal', 'car-modal', 'back-modal'].forEach((id) => {
+    $(id).classList.remove('open');
+    $(id).setAttribute('aria-hidden', 'true');
+  });
 }
 
-$('btn-new-hire').addEventListener('click', openHire);
-$('hire-close').addEventListener('click', closeHire);
-$('scrim').addEventListener('click', closeHire);
+$('scrim').addEventListener('click', closeModals);
+['lend-close', 'lend-cancel', 'car-close', 'car-cancel', 'back-close', 'back-cancel']
+  .forEach((id) => $(id).addEventListener('click', closeModals));
 
-async function loadHireCustomers() {
+/** The "+ more" expanders. Both modals open with only the fields that are
+    actually required on screen; everything else is one click away, which is
+    the difference between a form somebody fills in and one they dread. */
+function wireMore(toggleID, panelID, moreText, lessText) {
+  $(toggleID).addEventListener('click', () => {
+    const open = $(panelID).hidden;
+    $(panelID).hidden = !open;
+    $(toggleID).textContent = open ? lessText : moreText;
+    $(toggleID).setAttribute('aria-expanded', String(open));
+  });
+}
+wireMore('lend-more', 'lend-extra',
+  '+ While their car is in for repair, mileage, notes', '− Fewer options');
+wireMore('car-more', 'car-extra', '+ More details', '− Fewer details');
+
+// The courtesy registration only means anything once "yes" is chosen.
+$('l-courtesy-yn').addEventListener('change', () => {
+  $('l-courtesy-wrap').hidden = $('l-courtesy-yn').value !== 'yes';
+});
+
+// ── lending a car out ─────────────────────────────────────────────────────
+
+async function openLend(vehicleID) {
+  const car = state.cars.find((c) => String(c.id) === String(vehicleID));
+  if (!car) return;
+  state.lending = car;
+
+  $('lend-err').textContent = '';
+  $('lend-car').innerHTML =
+    `<span class="reg">${esc(car.registration)}</span>
+     <span>${esc([car.make, car.model].filter(Boolean).join(' '))}</span>`;
+  // A week is the ordinary loan, and the date is the one field somebody
+  // will change every time — so it starts somewhere sensible rather than empty.
+  $('l-back').value = addDays(todayISO(), 7);
+  $('l-mileage').value = car.mileage ? Math.round(car.mileage) : '';
+  $('l-note').value = '';
+  $('l-courtesy').value = '';
+  $('l-courtesy-yn').value = 'no';
+  $('l-courtesy-wrap').hidden = true;
+
+  openModal('lend-modal');
+  await loadHireCustomers('l-customer');
+}
+
+function addDays(iso, days) {
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+async function loadHireCustomers(selectID) {
   const list = await api('/api/rentals/customers');
-  $('h-customer').innerHTML = '<option value="">— choose a customer —</option>' +
+  $(selectID).innerHTML = '<option value="">— choose a customer —</option>' +
     list.map((c) => `<option value="${c.id}">${esc(c.name)}${c.phone ? ' · ' + esc(c.phone) : ''}</option>`).join('');
 }
 
-/** The available list is fetched from the same overlap rule the booking
-    call enforces, so anything offered here is something the server will
-    actually accept — the two can never drift into offering a car that is
-    then refused. */
-async function refreshAvailable() {
-  const from = $('h-from').value;
-  const to = $('h-to').value;
-  const sel = $('h-car');
-  if (!from || !to) {
-    sel.innerHTML = '<option value="">— pick dates first —</option>';
-    return;
-  }
-  if (to < from) {
-    sel.innerHTML = '<option value="">— the end date is before the start —</option>';
-    $('h-dates-hint').textContent = 'The end date cannot be before the start date.';
-    return;
-  }
-  try {
-    const cars = await api(`/api/rentals/available?from=${from}&to=${to}`);
-    const days = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
-    $('h-dates-hint').textContent =
-      `${days} day${days === 1 ? '' : 's'} · ${cars.length} car${cars.length === 1 ? '' : 's'} free`;
-    sel.innerHTML = cars.length
-      ? '<option value="">— choose a car —</option>' + cars.map((c) =>
-          `<option value="${c.id}" data-rate="${c.daily_rate}">${esc(c.registration)} · ${esc([c.make, c.model].filter(Boolean).join(' '))} · £${money(c.daily_rate)}/day</option>`).join('')
-      : '<option value="">— nothing free over those dates —</option>';
-    updateHireTotal();
-  } catch (e) {
-    $('h-dates-hint').textContent = e.message;
-  }
-}
+$('lend-save').addEventListener('click', async () => {
+  $('lend-err').textContent = '';
+  if (!state.lending) return;
+  const customerID = Number($('l-customer').value);
+  if (!customerID) { $('lend-err').textContent = 'Who is taking it?'; return; }
+  if (!$('l-back').value) { $('lend-err').textContent = 'When is it back?'; return; }
 
-function updateHireTotal() {
-  const opt = $('h-car').selectedOptions[0];
-  const rate = Number(opt?.dataset.rate || 0);
-  const from = $('h-from').value;
-  const to = $('h-to').value;
-  if (!rate || !from || !to || to < from) { $('h-total').textContent = ''; return; }
-  const days = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
-  $('h-total').innerHTML =
-    `${days} day${days === 1 ? '' : 's'} at £${money(rate)} — <strong>£${money(days * rate)}</strong>`;
-}
-
-$('h-from').addEventListener('change', refreshAvailable);
-$('h-to').addEventListener('change', refreshAvailable);
-$('h-car').addEventListener('change', updateHireTotal);
-
-$('h-save').addEventListener('click', async () => {
-  $('h-err').textContent = '';
-  const body = {
-    vehicle_id: Number($('h-car').value),
-    customer_id: Number($('h-customer').value),
-    starts_on: $('h-from').value,
-    ends_on: $('h-to').value,
-    notes: $('h-notes').value,
-  };
-  if (!body.vehicle_id) { $('h-err').textContent = 'Pick a car.'; return; }
-  if (!body.customer_id) { $('h-err').textContent = 'Pick a customer.'; return; }
-
-  const btn = $('h-save');
+  const btn = $('lend-save');
   btn.disabled = true;
-  btn.textContent = 'Booking…';
+  btn.textContent = 'Lending…';
   try {
-    await api('/api/rentals/agreements', { method: 'POST', json: body });
-    toast('Hire booked');
-    $('h-notes').value = '';
-    closeHire();
+    await api('/api/rentals/lend', {
+      method: 'POST',
+      json: {
+        vehicle_id: state.lending.id,
+        customer_id: customerID,
+        back_on: $('l-back').value,
+        mileage_now: Number($('l-mileage').value) || 0,
+        courtesy_for_reg: $('l-courtesy-yn').value === 'yes' ? $('l-courtesy').value : '',
+        note: $('l-note').value,
+      },
+    });
+    toast(`${state.lending.registration} is out`);
+    closeModals();
     show(state.view);
   } catch (e) {
-    $('h-err').textContent = e.message;
+    $('lend-err').textContent = e.message;
   }
   btn.disabled = false;
-  btn.textContent = 'Book it';
+  btn.textContent = 'Lend it out';
+});
+
+// ── bringing one back ─────────────────────────────────────────────────────
+
+function openBack(agreementID, label) {
+  state.returning = agreementID;
+  $('back-err').textContent = '';
+  $('back-car').textContent = label || '';
+  $('b-mileage').value = '';
+  openModal('back-modal');
+}
+
+$('back-save').addEventListener('click', async () => {
+  $('back-err').textContent = '';
+  try {
+    await api(`/api/rentals/agreements/${state.returning}/back`, {
+      method: 'POST',
+      json: { mileage_in: Number($('b-mileage').value) || 0 },
+    });
+    toast('Back on the forecourt');
+    closeModals();
+    show(state.view);
+  } catch (e) {
+    $('back-err').textContent = e.message;
+  }
+});
+
+// ── adding one of our cars ────────────────────────────────────────────────
+
+$('btn-add-car').addEventListener('click', () => {
+  $('car-err').textContent = '';
+  ['c-reg', 'c-make', 'c-model', 'c-year', 'c-colour', 'c-mileage', 'c-mot', 'c-rate', 'c-notes']
+    .forEach((id) => { $(id).value = ''; });
+  $('c-status').value = 'available';
+  openModal('car-modal');
+});
+
+$('car-save').addEventListener('click', async () => {
+  $('car-err').textContent = '';
+  const btn = $('car-save');
+  btn.disabled = true;
+  try {
+    await api('/api/rentals/vehicles', {
+      method: 'POST',
+      json: {
+        registration: $('c-reg').value,
+        make: $('c-make').value,
+        model: $('c-model').value,
+        status: $('c-status').value,
+        year: $('c-year').value,
+        colour: $('c-colour').value,
+        mileage: Number($('c-mileage').value) || 0,
+        mot_expires: $('c-mot').value,
+        daily_rate: Number($('c-rate').value) || 0,
+        notes: $('c-notes').value,
+      },
+    });
+    toast('Added to the loan fleet');
+    closeModals();
+    show(state.view);
+  } catch (e) {
+    $('car-err').textContent = e.message;
+  }
+  btn.disabled = false;
 });
 
 // ── boot ──────────────────────────────────────────────────────────────────
