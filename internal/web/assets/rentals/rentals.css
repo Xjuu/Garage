@@ -159,3 +159,9 @@ tbody tr.row-muted td { color: var(--g4); }
 
 .req { color: var(--flag); }
 .field-hint { display: block; margin-top: 5px; font-size: 12px; color: var(--g4); }
+
+/* The courtesy pairing reads as one sentence — their car, an arrow, ours —
+   so the swap is obvious without a table's worth of column headings. */
+.swap { color: var(--g4); }
+.pill.flag-soft { color: var(--g5); border-color: var(--g3); background: var(--g05); }
+.car-row .reg { flex-shrink: 0; }

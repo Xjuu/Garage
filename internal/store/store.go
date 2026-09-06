@@ -362,6 +362,14 @@ CREATE TABLE IF NOT EXISTS rental_agreements (
   -- customer's own car sitting in the workshop.
   mileage_out REAL NOT NULL DEFAULT 0,
   courtesy_for_reg TEXT NOT NULL DEFAULT '',
+  -- Payment, via a Stripe hosted checkout page. payment_url is kept so the
+  -- same link can be handed to the customer again rather than opening a
+  -- second session for one hire.
+  paid            INTEGER NOT NULL DEFAULT 0,
+  payment_session TEXT NOT NULL DEFAULT '',
+  payment_url     TEXT NOT NULL DEFAULT '',
+  -- When the "your car is ready" text went out, so nobody sends it twice.
+  ready_texted_at TEXT NOT NULL DEFAULT '',
   notes       TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL
 );
@@ -413,6 +421,22 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 );
 
 CREATE INDEX IF NOT EXISTS idx_stock_movements_part ON stock_movements(part_id);
+
+-- Integration settings ------------------------------------------------------
+
+-- Credentials for the outside services this system talks to (Twilio for
+-- texts, Stripe for card payments), entered from the Admin page rather than
+-- put in .env by hand — the people who run this do not have a shell.
+--
+-- They live in the database rather than a file beside it specifically
+-- because the database is encrypted at rest and its key is deliberately NOT
+-- in the data directory (see Open): a copied data folder carries these
+-- secrets no further than it carries the invoices.
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
 `
 
 // seed inserts the fleet the user actually operates. Overall Clients is the
@@ -512,6 +536,10 @@ func migrate(db *sql.DB) error {
 		"rental_agreements": {
 			"mileage_out":      "ALTER TABLE rental_agreements ADD COLUMN mileage_out REAL NOT NULL DEFAULT 0",
 			"courtesy_for_reg": "ALTER TABLE rental_agreements ADD COLUMN courtesy_for_reg TEXT NOT NULL DEFAULT ''",
+			"paid":             "ALTER TABLE rental_agreements ADD COLUMN paid INTEGER NOT NULL DEFAULT 0",
+			"payment_session":  "ALTER TABLE rental_agreements ADD COLUMN payment_session TEXT NOT NULL DEFAULT ''",
+			"payment_url":      "ALTER TABLE rental_agreements ADD COLUMN payment_url TEXT NOT NULL DEFAULT ''",
+			"ready_texted_at":  "ALTER TABLE rental_agreements ADD COLUMN ready_texted_at TEXT NOT NULL DEFAULT ''",
 		},
 		"users": {
 			"totp_exempt": "ALTER TABLE users ADD COLUMN totp_exempt INTEGER NOT NULL DEFAULT 0",

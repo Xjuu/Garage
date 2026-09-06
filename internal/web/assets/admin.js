@@ -60,6 +60,7 @@ async function loadAdmin() {
   renderBackups(a.backups, a.schedule);
 
   $('model-pick')?.addEventListener('focus', loadModelOptions, { once: true });
+  loadIntegrations().catch(() => {});
 }
 
 /** Backups and the nightly timer, together: they are the two things that fail
@@ -325,3 +326,61 @@ $('rp-save').addEventListener('click', async () => {
 });
 
 Object.assign(viewLoaders, { admin: () => loadAdmin().then(loadLogs).then(loadRepairsAdmin) });
+
+// ── Texting & payments ────────────────────────────────────────────────────
+//
+// The secrets are never sent back to the browser, only whether they are set
+// — so the two password boxes always start empty and an empty box means
+// "leave what is saved" rather than "clear it". Saying that in the field's
+// own placeholder is what stops someone wiping a working key by saving the
+// form after editing something else.
+
+async function loadIntegrations() {
+  const s = await api('/api/admin/integrations');
+  $('tw-sid').value = s.twilio_account_sid || '';
+  $('tw-from').value = s.twilio_from_number || '';
+  $('st-pub').value = s.stripe_publishable_key || '';
+  $('st-return').value = s.stripe_return_url || '';
+  $('int-state').innerHTML = [
+    `Twilio: ${s.twilio_ready ? ok('ready to send') : warn('not set up')}`,
+    `token ${s.twilio_auth_token_set ? ok('saved') : warn('missing')}`,
+    `· Stripe: ${s.stripe_ready ? ok('ready to charge') : warn('not set up')}`,
+    `secret key ${s.stripe_secret_key_set ? ok('saved') : warn('missing')}`,
+  ].join(' · ');
+}
+
+$('int-save')?.addEventListener('click', async () => {
+  $('int-status').textContent = 'Saving…';
+  try {
+    await api('/api/admin/integrations', {
+      method: 'POST',
+      json: {
+        twilio_account_sid: $('tw-sid').value,
+        twilio_auth_token: $('tw-token').value,
+        twilio_from_number: $('tw-from').value,
+        stripe_secret_key: $('st-key').value,
+        stripe_publishable_key: $('st-pub').value,
+        stripe_return_url: $('st-return').value,
+      },
+    });
+    // Clear the two secret boxes so a saved key is never sitting in the DOM.
+    $('tw-token').value = '';
+    $('st-key').value = '';
+    $('int-status').textContent = 'Saved';
+    loadIntegrations();
+  } catch (e) {
+    $('int-status').textContent = e.message;
+  }
+});
+
+$('tw-send-test')?.addEventListener('click', async () => {
+  const to = $('tw-test').value.trim();
+  if (!to) { $('tw-status').textContent = 'Put a number in first'; return; }
+  $('tw-status').textContent = 'Sending…';
+  try {
+    await api('/api/admin/test-twilio', { method: 'POST', json: { to } });
+    $('tw-status').innerHTML = ok('sent — check the phone');
+  } catch (e) {
+    $('tw-status').innerHTML = warn(e.message);
+  }
+});

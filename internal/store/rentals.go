@@ -292,6 +292,10 @@ type RentalAgreement struct {
 	DailyRate      float64 `json:"daily_rate"`
 	MileageOut     float64 `json:"mileage_out"`
 	CourtesyForReg string  `json:"courtesy_for_reg"`
+	Paid           bool    `json:"paid"`
+	PaymentSession string  `json:"payment_session"`
+	PaymentURL     string  `json:"payment_url"`
+	ReadyTextedAt  string  `json:"ready_texted_at"`
 	Notes          string  `json:"notes"`
 	CreatedAt      string  `json:"created_at"`
 }
@@ -314,7 +318,8 @@ type RentalAgreementView struct {
 
 const rentalAgreementView = `
 	SELECT a.id, a.vehicle_id, a.customer_id, a.starts_on, a.ends_on, a.returned_on,
-	       a.status, a.daily_rate, a.mileage_out, a.courtesy_for_reg, a.notes, a.created_at,
+	       a.status, a.daily_rate, a.mileage_out, a.courtesy_for_reg,
+	       a.paid, a.payment_session, a.payment_url, a.ready_texted_at, a.notes, a.created_at,
 	       c.name, c.phone, v.registration, v.make, v.model,
 	       CAST(julianday(a.ends_on) - julianday(a.starts_on) AS INTEGER) + 1
 	FROM rental_agreements a
@@ -323,11 +328,14 @@ const rentalAgreementView = `
 
 func scanRentalAgreementView(scan func(...any) error) (*RentalAgreementView, error) {
 	var a RentalAgreementView
+	var paid int
 	if err := scan(&a.ID, &a.VehicleID, &a.CustomerID, &a.StartsOn, &a.EndsOn, &a.ReturnedOn,
-		&a.Status, &a.DailyRate, &a.MileageOut, &a.CourtesyForReg, &a.Notes, &a.CreatedAt,
+		&a.Status, &a.DailyRate, &a.MileageOut, &a.CourtesyForReg,
+		&paid, &a.PaymentSession, &a.PaymentURL, &a.ReadyTextedAt, &a.Notes, &a.CreatedAt,
 		&a.CustomerName, &a.Phone, &a.Registration, &a.Make, &a.Model, &a.Days); err != nil {
 		return nil, err
 	}
+	a.Paid = paid != 0
 	if a.Days < 1 {
 		a.Days = 1
 	}
@@ -721,4 +729,162 @@ func (s *Store) RentalBoard() (*RentalBoard, error) {
 		return nil, err
 	}
 	return &RentalBoard{Free: free, Out: out}, nil
+}
+
+// ── payment and messages ──────────────────────────────────────────────────
+
+// StartRentalPayment records the checkout page opened for a hire. The URL
+// is kept so the same link can be sent again — pressing the button twice
+// should hand over the same page, not open a second one Stripe would then
+// be waiting on forever.
+func (s *Store) StartRentalPayment(agreementID int64, sessionID, url string) error {
+	_, err := s.db.Exec(`UPDATE rental_agreements
+		SET payment_session = ?, payment_url = ? WHERE id = ?`, sessionID, url, agreementID)
+	return err
+}
+
+// MarkRentalPaid is called once Stripe confirms the money arrived.
+func (s *Store) MarkRentalPaid(agreementID int64) error {
+	_, err := s.db.Exec(`UPDATE rental_agreements SET paid = 1 WHERE id = ?`, agreementID)
+	return err
+}
+
+// MarkReadyTexted stamps when the "your car is ready" message went out, so
+// the desk can see it has been sent rather than sending it again.
+func (s *Store) MarkReadyTexted(agreementID int64) error {
+	_, err := s.db.Exec(`UPDATE rental_agreements
+		SET ready_texted_at = datetime('now') WHERE id = ?`, agreementID)
+	return err
+}
+
+// ── statistics ────────────────────────────────────────────────────────────
+
+// RentalStats is the money view: what is on hire right now, what has been
+// earned, and which cars are actually earning it.
+type RentalStats struct {
+	// OnHireNow is the value of every hire currently out — money committed,
+	// not yet necessarily collected.
+	OnHireNow float64 `json:"on_hire_now"`
+	// Billed counts every hire that was not cancelled; Collected is the part
+	// Stripe has actually confirmed. The gap between them is what is owed.
+	BilledAllTime    float64 `json:"billed_all_time"`
+	CollectedAllTime float64 `json:"collected_all_time"`
+	OutstandingNow   float64 `json:"outstanding_now"`
+	BilledThisMonth  float64 `json:"billed_this_month"`
+	HiresThisMonth   int     `json:"hires_this_month"`
+	AvgHireDays      float64 `json:"avg_hire_days"`
+	AvgHireValue     float64 `json:"avg_hire_value"`
+	// UtilisationPct is the share of the loan fleet out on hire right now —
+	// the number that says whether more cars are needed or fewer.
+	UtilisationPct float64          `json:"utilisation_pct"`
+	TopCars        []RentalCarStats `json:"top_cars"`
+}
+
+// RentalCarStats is one car's earning record.
+type RentalCarStats struct {
+	VehicleID    int64   `json:"vehicle_id"`
+	Registration string  `json:"registration"`
+	Make         string  `json:"make"`
+	Model        string  `json:"model"`
+	Hires        int     `json:"hires"`
+	Days         int     `json:"days"`
+	Billed       float64 `json:"billed"`
+}
+
+// hireValue is the agreed length in whole days, inclusive of both ends,
+// times the rate. A function rather than a constant because one of the
+// queries below joins rental_vehicles, which has a daily_rate of its own —
+// the alias has to be explicit there, and having two hand-written copies of
+// this arithmetic is exactly how two figures on one screen end up
+// disagreeing. Pass "" when only one table is in scope.
+func hireValue(alias string) string {
+	if alias != "" {
+		alias += "."
+	}
+	return alias + `daily_rate * (CAST(julianday(` + alias + `ends_on) - julianday(` +
+		alias + `starts_on) AS INTEGER) + 1)`
+}
+
+func (s *Store) RentalStats() (*RentalStats, error) {
+	st := &RentalStats{}
+	err := s.db.QueryRow(`
+		SELECT
+		  (SELECT COALESCE(SUM(`+hireValue("")+`),0) FROM rental_agreements WHERE status = 'out'),
+		  (SELECT COALESCE(SUM(`+hireValue("")+`),0) FROM rental_agreements WHERE status <> 'cancelled'),
+		  (SELECT COALESCE(SUM(`+hireValue("")+`),0) FROM rental_agreements WHERE status <> 'cancelled' AND paid = 1),
+		  (SELECT COALESCE(SUM(`+hireValue("")+`),0) FROM rental_agreements
+		     WHERE status <> 'cancelled' AND strftime('%Y-%m', starts_on) = strftime('%Y-%m', 'now')),
+		  (SELECT COUNT(1) FROM rental_agreements
+		     WHERE status <> 'cancelled' AND strftime('%Y-%m', starts_on) = strftime('%Y-%m', 'now')),
+		  (SELECT COALESCE(AVG(CAST(julianday(ends_on) - julianday(starts_on) AS INTEGER) + 1),0)
+		     FROM rental_agreements WHERE status <> 'cancelled'),
+		  (SELECT COALESCE(AVG(`+hireValue("")+`),0) FROM rental_agreements WHERE status <> 'cancelled'),
+		  (SELECT COUNT(1) FROM rental_vehicles WHERE status <> 'retired')`).
+		Scan(&st.OnHireNow, &st.BilledAllTime, &st.CollectedAllTime,
+			&st.BilledThisMonth, &st.HiresThisMonth, &st.AvgHireDays, &st.AvgHireValue,
+			new(int))
+	if err != nil {
+		return nil, err
+	}
+	st.OutstandingNow = st.BilledAllTime - st.CollectedAllTime
+
+	// Utilisation is worked out separately rather than squeezed into the row
+	// above: dividing by a fleet of zero is a real state on a fresh install.
+	var fleet, out int
+	if err := s.db.QueryRow(`SELECT
+		(SELECT COUNT(1) FROM rental_vehicles WHERE status <> 'retired'),
+		(SELECT COUNT(1) FROM rental_agreements WHERE status = 'out')`).Scan(&fleet, &out); err != nil {
+		return nil, err
+	}
+	if fleet > 0 {
+		st.UtilisationPct = float64(out) / float64(fleet) * 100
+	}
+
+	rows, err := s.db.Query(`
+		SELECT v.id, v.registration, v.make, v.model,
+		       COUNT(a.id),
+		       COALESCE(SUM(CAST(julianday(a.ends_on) - julianday(a.starts_on) AS INTEGER) + 1), 0),
+		       COALESCE(SUM(` + hireValue("a") + `), 0)
+		FROM rental_vehicles v
+		LEFT JOIN rental_agreements a ON a.vehicle_id = v.id AND a.status <> 'cancelled'
+		GROUP BY v.id
+		ORDER BY 7 DESC, v.registration
+		LIMIT 10`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	st.TopCars = []RentalCarStats{}
+	for rows.Next() {
+		var c RentalCarStats
+		if err := rows.Scan(&c.VehicleID, &c.Registration, &c.Make, &c.Model,
+			&c.Hires, &c.Days, &c.Billed); err != nil {
+			return nil, err
+		}
+		st.TopCars = append(st.TopCars, c)
+	}
+	return st, rows.Err()
+}
+
+// CourtesyLoans answers the question this feature exists for: whose car is
+// in the workshop, and what are they driving in the meantime. Only loans
+// that are actually out, and only those standing in for a specific car.
+func (s *Store) CourtesyLoans() ([]RentalAgreementView, error) {
+	rows, err := s.db.Query(rentalAgreementView + `
+		WHERE a.status = 'out' AND a.courtesy_for_reg <> ''
+		ORDER BY a.starts_on`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []RentalAgreementView{}
+	for rows.Next() {
+		a, err := scanRentalAgreementView(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *a)
+	}
+	return out, rows.Err()
 }

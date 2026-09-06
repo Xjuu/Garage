@@ -593,6 +593,44 @@
       </div>
     </div>
 
+    <div class="section-title">Texting &amp; payments</div>
+    <div class="panel" style="padding:16px 18px;margin-bottom:18px">
+      <div class="m" style="color:var(--g4);font-size:12px;margin-bottom:14px">
+        Used by the rentals site: Twilio sends "your car is ready" texts, Stripe takes
+        card payments for a hire. Both are stored in the encrypted database, never in a file.
+      </div>
+
+      <div class="grid2" style="margin-bottom:12px">
+        <div class="field"><label for="tw-sid">Twilio account SID</label>
+          <input type="text" id="tw-sid" placeholder="AC…" autocomplete="off"></div>
+        <div class="field"><label for="tw-token">Twilio auth token</label>
+          <input type="password" id="tw-token" placeholder="leave blank to keep the saved one" autocomplete="new-password"></div>
+        <div class="field"><label for="tw-from">Twilio from-number</label>
+          <input type="text" id="tw-from" placeholder="+44…" autocomplete="off"></div>
+        <div class="field"><label for="tw-test">Send a test to</label>
+          <input type="text" id="tw-test" placeholder="+44…" autocomplete="off"></div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+        <button class="btn" id="tw-send-test">Send test text</button>
+        <span id="tw-status" style="font-size:13px;align-self:center"></span>
+      </div>
+
+      <div class="grid2" style="margin-bottom:12px">
+        <div class="field"><label for="st-key">Stripe secret key</label>
+          <input type="password" id="st-key" placeholder="leave blank to keep the saved one" autocomplete="new-password"></div>
+        <div class="field"><label for="st-pub">Stripe publishable key</label>
+          <input type="text" id="st-pub" placeholder="pk_…" autocomplete="off"></div>
+        <div class="field grid-wide"><label for="st-return">Return URL after paying</label>
+          <input type="text" id="st-return" placeholder="https://rentals.yourdomain.co.uk/" autocomplete="off"></div>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn solid" id="int-save">Save keys</button>
+        <span id="int-status" style="font-size:13px;align-self:center"></span>
+      </div>
+      <div id="int-state" style="font-size:12.5px;color:var(--g4);margin-top:12px"></div>
+    </div>
+
     <div class="section-title">Change password</div>
     <div class="panel" style="padding:16px 18px;margin-bottom:18px">
       <div class="grid2" style="margin-bottom:12px">

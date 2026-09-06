@@ -84,7 +84,17 @@ async function fakeFetch(url, opts = {}) {
   if (url.startsWith('/api/rentals/customers')) {
     return json([{ id: 7, name: 'Alex Rider', phone: '+447700900123' }]);
   }
-  if (url.startsWith('/api/rentals/agreements')) return json([]);
+  if (url === '/api/rentals/stats') {
+    return json({
+      on_hire_now: 300, billed_all_time: 1200, collected_all_time: 900,
+      outstanding_now: 300, billed_this_month: 450, hires_this_month: 2,
+      avg_hire_days: 4.5, avg_hire_value: 180, utilisation_pct: 50,
+      top_cars: [{ vehicle_id: 11, registration: 'RE24NTL', make: 'Kia', model: 'Ceed',
+        hires: 3, days: 12, billed: 456 }],
+    });
+  }
+  if (url === '/api/rentals/courtesy') return json([OUT[0]]);
+  if (url.startsWith('/api/rentals/agreements')) return json(OUT);
   if (url.startsWith('/api/rentals/vehicles')) return json([]);
   return json({ ok: true });
 }
@@ -106,6 +116,8 @@ const ctx = vm.createContext({
     cookie: 'goldstar_csrf=test-csrf-token',
   },
   location: { href: '' },
+  navigator: { clipboard: { writeText: async () => {} } },
+  open() {},
   setTimeout, clearTimeout,
   fetch: fakeFetch,
   Math, JSON, Object, Array, Number, String, Boolean, Date, Set, Map, Promise,
@@ -270,6 +282,67 @@ function ok(cond, label) {
   fetchCalls.length = 0;
   await ctx.api('/api/rentals/board');
   ok(fetchCalls.length === 1, 'but it can still see the board');
+
+  // ── every tab actually opens ─────────────────────────────────────────
+  // The bug this exists for: wireAgreementButtons was deleted with the old
+  // Today view while the Hires tab still called it. app.js loaded fine, so
+  // nothing caught it until someone clicked Hires in production. Loading a
+  // file is not the same as running its screens.
+  //
+  // The loaders are reached by name rather than through viewLoaders: that
+  // is a `const`, and a vm context only exposes function declarations, not
+  // const bindings.
+  body.dataset.readonly = '';
+  for (const [name, fn] of [
+    ['Today', ctx.loadToday], ['Courtesy cars', ctx.loadCourtesy], ['Money', ctx.loadMoney],
+    ['Hires', ctx.loadHires], ['Cars', ctx.loadCars], ['Customers', ctx.loadCustomers],
+  ]) {
+    let threw = null;
+    if (typeof fn !== 'function') { threw = new Error('loader is not defined at all'); }
+    else {
+      try { await fn(); } catch (e) { threw = e; }
+    }
+    ok(threw === null, `the ${name} tab loads without throwing: ` + (threw && threw.message));
+  }
+
+  // ── the money view ───────────────────────────────────────────────────
+  await ctx.loadMoney();
+  const tiles = store['money-tiles'].innerHTML;
+  ok(tiles.includes('On hire right now') && tiles.includes('300.00'),
+    'the money view shows what is on hire right now');
+  ok(tiles.includes('Still owed') && tiles.includes('Collected all time'),
+    'and what has been collected against what is still owed');
+  ok(/tile alert[\s\S]{0,140}Still owed/.test(tiles),
+    'money outstanding is flagged rather than stated flatly');
+  ok(tiles.includes('50%'), 'and how much of the fleet is actually earning');
+  ok(store['car-earnings'].innerHTML.includes('RE24NTL') &&
+     store['car-earnings'].innerHTML.includes('456.00'),
+    'earning is broken down per car');
+
+  // ── courtesy pairing ─────────────────────────────────────────────────
+  await ctx.loadCourtesy();
+  const c = store['courtesy-panel'].innerHTML;
+  ok(c.includes('AB12CDE') && c.includes('RE21NTL'),
+    'the courtesy view pairs their car with the one they are driving');
+  ok(c.indexOf('AB12CDE') < c.indexOf('RE21NTL'),
+    'their own car reads first, then what they are in — "AB12CDE → driving RE21NTL"');
+  ok(c.includes('In the workshop'), 'and says why they have it');
+
+  // ── payment and texting on a hire ────────────────────────────────────
+  await ctx.loadHires();
+  const rows = store['hire-rows'].innerHTML;
+  ok(rows.includes('data-pay='), 'an unpaid hire offers to take payment');
+  ok(rows.includes('data-text='), 'and to text the customer their car is ready');
+
+  fetchCalls.length = 0;
+  await ctx.textCarReady(1);
+  ok(fetchCalls.some((c2) => c2.url === '/api/rentals/agreements/1/text-ready' &&
+    c2.opts.method === 'POST'), 'texting posts to the hire it is about');
+
+  fetchCalls.length = 0;
+  await ctx.takePayment(1);
+  ok(fetchCalls.some((c2) => c2.url === '/api/rentals/agreements/1/pay' &&
+    c2.opts.method === 'POST'), 'taking payment opens a checkout for that hire');
 
   process.exit(failed ? 1 : 0);
 })();

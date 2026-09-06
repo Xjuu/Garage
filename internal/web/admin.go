@@ -32,6 +32,9 @@ func (s *Server) routesAdmin(api *http.ServeMux) {
 	api.HandleFunc("POST /api/admin/vacuum", s.requireAdmin(s.json(s.vacuum)))
 	api.HandleFunc("GET /api/admin/backup", s.requireAdmin(s.backup))
 	api.HandleFunc("GET /api/admin/logs", s.requireAdmin(s.json(s.recentLogs)))
+	api.HandleFunc("GET /api/admin/integrations", s.requireAdmin(s.json(s.integrationSettings)))
+	api.HandleFunc("POST /api/admin/integrations", s.requireAdmin(s.json(s.saveIntegrationSettings)))
+	api.HandleFunc("POST /api/admin/test-twilio", s.requireAdmin(s.json(s.testTwilio)))
 	// TEMP — see totpReshow in totp.go.
 	api.HandleFunc("GET /api/admin/totp-qr", s.requireAdmin(s.json(s.totpReshow)))
 }

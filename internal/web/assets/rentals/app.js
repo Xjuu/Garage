@@ -218,13 +218,70 @@ async function loadHires() {
   wireAgreementButtons();
 }
 
+/** The actions on a hire row, wired wherever they are rendered. Deleted
+    along with the old Today view when the board replaced it, but the Hires
+    tab still renders these buttons — which is exactly the shape of bug a
+    "loads without throwing" check cannot catch, because the throw only
+    happens once someone opens that tab. */
+function wireAgreementButtons() {
+  document.querySelectorAll('[data-pickup]').forEach((b) =>
+    b.addEventListener('click', () => setStatus(b.dataset.pickup, 'out', 'Marked as picked up')));
+  document.querySelectorAll('[data-cancel]').forEach((b) =>
+    b.addEventListener('click', () => setStatus(b.dataset.cancel, 'cancelled', 'Hire cancelled')));
+  // Returning goes through the same form the board uses, so a mileage
+  // reading is taken here too rather than only on the forecourt.
+  document.querySelectorAll('[data-return]').forEach((b) =>
+    b.addEventListener('click', () => openBack(b.dataset.return, b.dataset.label || '')));
+  document.querySelectorAll('[data-text]').forEach((b) =>
+    b.addEventListener('click', () => textCarReady(b.dataset.text)));
+  document.querySelectorAll('[data-pay]').forEach((b) =>
+    b.addEventListener('click', () => takePayment(b.dataset.pay)));
+}
+
+/** Tell a customer their own car is repaired. The message is composed
+    server-side from the hire, so it can name their car and remind them to
+    bring the loan one back — the desk does not retype it each time. */
+async function textCarReady(id) {
+  try {
+    const res = await api(`/api/rentals/agreements/${id}/text-ready`, { method: 'POST' });
+    toast(`Texted ${res.sent_to}`);
+    show(state.view);
+  } catch (e) { toast(e.message, true); }
+}
+
+/** Open (or re-open) the Stripe page for a hire. The link is copied to the
+    clipboard as well as opened, because the usual next step is sending it
+    to the customer rather than paying it at the counter. */
+async function takePayment(id) {
+  try {
+    const res = await api(`/api/rentals/agreements/${id}/pay`, { method: 'POST' });
+    if (navigator.clipboard) navigator.clipboard.writeText(res.url).catch(() => {});
+    toast(res.reused ? 'Payment link copied (already open)' : 'Payment link copied');
+    window.open(res.url, '_blank', 'noopener');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function setStatus(id, status, msg) {
+  try {
+    await api(`/api/rentals/agreements/${id}/status`, { method: 'PATCH', json: { status } });
+    toast(msg);
+    show(state.view);
+  } catch (e) { toast(e.message, true); }
+}
+
 function hireActions(a) {
+  const money = a.paid
+    ? '<span class="pill">Paid</span>'
+    : `<button class="btn sm" data-pay="${a.id}">Take payment</button>`;
+  if (a.status === 'out') {
+    return `${money}
+      <button class="btn sm" data-text="${a.id}"${a.ready_texted_at ? ' disabled title="Already sent"' : ''}>Text: car ready</button>
+      <button class="btn sm" data-return="${a.id}" data-label="${esc(a.registration)} · ${esc(a.customer_name)}">Returned</button>`;
+  }
+  if (a.status === 'returned') return money;
   if (a.status === 'booked') {
     return `<button class="btn sm solid" data-pickup="${a.id}">Picked up</button>
             <button class="btn sm" data-cancel="${a.id}">Cancel</button>`;
-  }
-  if (a.status === 'out') {
-    return `<button class="btn sm" data-return="${a.id}">Returned</button>`;
   }
   return '';
 }
@@ -236,6 +293,65 @@ document.querySelectorAll('#hire-filters .chip').forEach((c) =>
       o.setAttribute('aria-pressed', String(o === c)));
     loadHires().catch((e) => toast(e.message, true));
   }));
+
+// ── courtesy cars ─────────────────────────────────────────────────────────
+
+async function loadCourtesy() {
+  const rows = await api('/api/rentals/courtesy');
+  $('courtesy-panel').innerHTML = rows.length
+    ? rows.map((a) => `
+        <div class="car-row ${isOverdue(a) ? 'row-flag' : ''}">
+          <div class="car-what">
+            <div class="car-name">${esc(a.customer_name)}</div>
+            <div class="car-sub">
+              <span class="pill flag-soft">In the workshop</span>
+              <span class="reg">${esc(a.courtesy_for_reg)}</span>
+              <span class="swap">→ driving</span>
+              <span class="reg">${esc(a.registration)}</span>
+              <span>${esc([a.make, a.model].filter(Boolean).join(' '))}</span>
+              · back ${esc(ukDate(a.ends_on))}
+              ${isOverdue(a) ? '<span class="pill flag">Overdue</span>' : ''}
+            </div>
+          </div>
+          <button class="btn sm" data-text="${a.id}"${a.ready_texted_at ? ' disabled title="Already sent"' : ''}>Text: car ready</button>
+          <button class="btn sm" data-back="${a.id}" data-label="${esc(a.registration)} · ${esc(a.customer_name)}">It's back</button>
+        </div>`).join('')
+    : '<div class="empty-box"><strong>No courtesy cars out</strong>A loan becomes one when you say whose car is in for repair.</div>';
+
+  document.querySelectorAll('[data-back]').forEach((b) =>
+    b.addEventListener('click', () => openBack(b.dataset.back, b.dataset.label)));
+  document.querySelectorAll('[data-text]').forEach((b) =>
+    b.addEventListener('click', () => textCarReady(b.dataset.text)));
+}
+
+// ── money ─────────────────────────────────────────────────────────────────
+
+async function loadMoney() {
+  const st = await api('/api/rentals/stats');
+  $('money-tiles').innerHTML = [
+    { k: 'On hire right now', v: '£' + money(st.on_hire_now), m: 'value of cars out' },
+    { k: 'Billed this month', v: '£' + money(st.billed_this_month), m: `${st.hires_this_month} hire(s)` },
+    { k: 'Collected all time', v: '£' + money(st.collected_all_time) },
+    { k: 'Still owed', v: '£' + money(st.outstanding_now), alert: st.outstanding_now > 0 },
+    { k: 'Fleet in use', v: Math.round(st.utilisation_pct) + '%' },
+    { k: 'Typical hire', v: '£' + money(st.avg_hire_value), m: `${st.avg_hire_days.toFixed(1)} days` },
+  ].map((t) => `
+    <div class="tile${t.alert ? ' alert' : ''}">
+      <div class="k">${esc(t.k)}</div><div class="v">${esc(t.v)}</div>
+      ${t.m ? `<div class="m">${esc(t.m)}</div>` : ''}
+    </div>`).join('');
+
+  $('car-earnings').innerHTML = st.top_cars.length
+    ? st.top_cars.map((c) => `
+        <tr>
+          <td><span class="reg">${esc(c.registration)}</span>
+              <span class="car-sub">${esc([c.make, c.model].filter(Boolean).join(' '))}</span></td>
+          <td class="num">${c.hires}</td>
+          <td class="num">${c.days}</td>
+          <td class="num strong">£${money(c.billed)}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="4" class="empty">Nothing hired out yet</td></tr>';
+}
 
 // ── cars ──────────────────────────────────────────────────────────────────
 
@@ -544,6 +660,8 @@ $('btn-logout').addEventListener('click', async () => {
 
 Object.assign(viewLoaders, {
   today: loadToday,
+  courtesy: loadCourtesy,
+  money: loadMoney,
   hires: loadHires,
   cars: loadCars,
   customers: loadCustomers,

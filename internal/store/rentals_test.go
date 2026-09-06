@@ -515,3 +515,153 @@ func TestCourtesyCarRecordsTheCarItIsStandingInFor(t *testing.T) {
 		t.Errorf("CourtesyForReg = %q, want empty for a plain loan", a2.CourtesyForReg)
 	}
 }
+
+func TestRentalStatsCountMoneyAndUtilisation(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db) // £45/day
+	// A second car, so utilisation is a share rather than all-or-nothing.
+	if _, err := db.AddRentalVehicle(RentalVehicle{Registration: "RE22NTL", DailyRate: 30}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Five days at 45 = 225, out now.
+	id, err := db.CreateRentalAgreement(RentalAgreement{
+		VehicleID: vehicleID, CustomerID: customerID,
+		StartsOn: "2026-09-10", EndsOn: "2026-09-14",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetRentalAgreementStatus(id, RentalOut, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := db.RentalStats()
+	if err != nil {
+		t.Fatalf("RentalStats: %v", err)
+	}
+	if st.OnHireNow != 225 {
+		t.Errorf("OnHireNow = %v, want 225", st.OnHireNow)
+	}
+	if st.BilledAllTime != 225 {
+		t.Errorf("BilledAllTime = %v, want 225", st.BilledAllTime)
+	}
+	// Nothing paid yet, so all of it is outstanding.
+	if st.CollectedAllTime != 0 || st.OutstandingNow != 225 {
+		t.Errorf("collected/outstanding = %v/%v, want 0/225", st.CollectedAllTime, st.OutstandingNow)
+	}
+	// One of two cars is out.
+	if st.UtilisationPct != 50 {
+		t.Errorf("UtilisationPct = %v, want 50", st.UtilisationPct)
+	}
+
+	// Once Stripe confirms, it moves from owed to collected.
+	if err := db.MarkRentalPaid(id); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = db.RentalStats()
+	if st.CollectedAllTime != 225 || st.OutstandingNow != 0 {
+		t.Errorf("after payment collected/outstanding = %v/%v, want 225/0",
+			st.CollectedAllTime, st.OutstandingNow)
+	}
+
+	// A cancelled hire is not money anyone ever owed.
+	id2, err := db.CreateRentalAgreement(RentalAgreement{
+		VehicleID: vehicleID, CustomerID: customerID,
+		StartsOn: "2026-10-01", EndsOn: "2026-10-02",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetRentalAgreementStatus(id2, RentalCancelled, ""); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = db.RentalStats()
+	if st.BilledAllTime != 225 {
+		t.Errorf("BilledAllTime = %v after a cancellation, want it unchanged at 225", st.BilledAllTime)
+	}
+
+	// The busiest car leads the earning table.
+	if len(st.TopCars) == 0 || st.TopCars[0].Registration != "RE21NTL" || st.TopCars[0].Billed != 225 {
+		t.Errorf("TopCars[0] = %+v, want RE21NTL having billed 225", st.TopCars)
+	}
+}
+
+// The courtesy view: whose car is in the workshop, and what they are
+// driving while it is.
+func TestCourtesyLoansListsOnlyLiveCourtesyCars(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	other, err := db.AddRentalVehicle(RentalVehicle{Registration: "RE22NTL", DailyRate: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backOn := time.Now().AddDate(0, 0, 4).Format("2006-01-02")
+
+	courtesy, err := db.LendCar(vehicleID, customerID, backOn, 0, "AB12CDE", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.LendCar(other, customerID, backOn, 0, "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := db.CourtesyLoans()
+	if err != nil {
+		t.Fatalf("CourtesyLoans: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("want only the courtesy loan, got %d", len(list))
+	}
+	if list[0].CourtesyForReg != "AB12CDE" || list[0].Registration != "RE21NTL" {
+		t.Errorf("want RE21NTL standing in for AB12CDE, got %+v", list[0])
+	}
+
+	// Once their own car is back and the loan is closed, it drops off.
+	if err := db.BringCarBack(courtesy, 0); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := db.CourtesyLoans(); len(list) != 0 {
+		t.Errorf("a returned courtesy car should not still be listed, got %d", len(list))
+	}
+}
+
+func TestPaymentAndTextStateStickToTheHire(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	backOn := time.Now().AddDate(0, 0, 2).Format("2006-01-02")
+	id, err := db.LendCar(vehicleID, customerID, backOn, 0, "AB12CDE", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a, _ := db.RentalAgreement(id)
+	if a.Paid || a.PaymentURL != "" || a.ReadyTextedAt != "" {
+		t.Fatalf("a new hire starts unpaid and unsent: %+v", a)
+	}
+
+	if err := db.StartRentalPayment(id, "cs_test_123", "https://checkout.stripe.com/x"); err != nil {
+		t.Fatal(err)
+	}
+	a, _ = db.RentalAgreement(id)
+	if a.PaymentSession != "cs_test_123" || a.PaymentURL == "" {
+		t.Errorf("the checkout page should be kept so the same link can be sent again: %+v", a)
+	}
+	if a.Paid {
+		t.Error("opening a checkout page is not payment")
+	}
+
+	if err := db.MarkRentalPaid(id); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ = db.RentalAgreement(id); !a.Paid {
+		t.Error("MarkRentalPaid did not stick")
+	}
+
+	if err := db.MarkReadyTexted(id); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ = db.RentalAgreement(id); a.ReadyTextedAt == "" {
+		t.Error("the ready text should be stamped so nobody sends it twice")
+	}
+}

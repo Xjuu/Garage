@@ -24,7 +24,9 @@
   </div>
   <nav class="tabs" role="tablist" id="tabs">
     <button role="tab" data-view="today" aria-selected="true">Today</button>
+    <button role="tab" data-view="courtesy" aria-selected="false">Courtesy cars</button>
     <button role="tab" data-view="hires" aria-selected="false">Hires</button>
+    <button role="tab" data-view="money" aria-selected="false">Money</button>
     <button role="tab" data-view="cars" aria-selected="false">Cars</button>
     <button role="tab" data-view="customers" aria-selected="false">Customers</button>
   </nav>
@@ -52,6 +54,27 @@
         <div class="panel" id="out-panel"></div>
       </div>
     </div>
+  </section>
+
+  <!-- Courtesy cars: whose car is in, and what they are driving meanwhile -->
+  <section class="view" id="view-courtesy">
+    <div class="view-head"><h2>Courtesy cars</h2>
+      <span class="sub">Customers whose own car is in the workshop, and the loan car they have.</span></div>
+    <div class="panel" id="courtesy-panel"></div>
+  </section>
+
+  <!-- Money -->
+  <section class="view" id="view-money">
+    <div class="view-head"><h2>Money</h2>
+      <span class="sub">What is on hire now, what has been earned, and what is still owed.</span></div>
+    <div class="tiles" id="money-tiles"></div>
+
+    <div class="section-title">Earning by car</div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Car</th><th class="num">Hires</th><th class="num">Days out</th><th class="num">Billed</th>
+      </tr></thead><tbody id="car-earnings"></tbody></table>
+    </div></div>
   </section>
 
   <!-- Hires -->
