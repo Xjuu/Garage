@@ -4,7 +4,6 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"goldstar/internal/store"
 )
@@ -69,36 +68,7 @@ func (s *Server) handleRentalsRoot(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	authed := s.auth.IsAuthenticated(r)
-	page := "assets/rentals/index.html"
-	if !authed {
-		page = "assets/login.html"
-	}
-	b, err := assets.ReadFile(page)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if authed {
-		role := store.RoleAdmin
-		temp, readOnly := false, false
-		if u, ok := s.auth.CurrentUser(r); ok {
-			role = u.Role
-			temp = u.TOTPExempt
-			readOnly = u.ReadOnly
-		}
-		attrs := `data-role="` + role + `"`
-		if temp {
-			attrs += ` data-temp="true"`
-		}
-		if readOnly {
-			attrs += ` data-readonly="true"`
-		}
-		b = []byte(strings.Replace(string(b), "<body>", "<body "+attrs+">", 1))
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write(versionAssets(b))
+	s.serveAppPage(w, r, "assets/rentals/index.html")
 }
 
 func (s *Server) rentalsOverview(r *http.Request) (any, error) { return s.db.RentalOverview() }

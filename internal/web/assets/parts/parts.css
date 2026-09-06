@@ -1,0 +1,66 @@
+/* Parts store — everything structural is inherited from app.css; this is
+   only what a scanner-driven counter needs on top of it. */
+
+/* The scan field is the whole interface, so it is sized like it: big
+   enough to read a code across the counter, and obviously the thing to
+   aim at when someone walks up holding a box. */
+.scan-wrap { margin-bottom: 26px; }
+.scan-wrap input {
+  font-family: var(--mono); font-size: 22px; font-weight: 700;
+  padding: 16px 18px; letter-spacing: .02em;
+}
+.scan-hint { font-size: 12.5px; color: var(--g4); margin-top: 8px; }
+
+.scanned-card { padding: 18px; margin-bottom: 22px; }
+.scanned-head {
+  display: flex; gap: 20px; align-items: flex-start;
+  padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--g2);
+}
+.scanned-part { font-size: 22px; font-weight: 800; letter-spacing: -0.03em; }
+.scanned-desc { font-size: 14px; color: var(--g5); margin-top: 2px; }
+.scanned-meta {
+  font-size: 12.5px; color: var(--g4); margin-top: 10px;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+
+/* The number the whole screen exists to show, sized accordingly. */
+.scanned-qty { margin-left: auto; text-align: right; flex-shrink: 0; }
+.scanned-qty .k {
+  font-size: 11px; font-weight: 700; color: var(--g4);
+  text-transform: uppercase; letter-spacing: .07em;
+}
+.scanned-qty .v {
+  font-size: 46px; font-weight: 800; letter-spacing: -0.045em; line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.adjust-grid {
+  display: grid; gap: 14px; margin-bottom: 14px;
+  grid-template-columns: 140px 1fr 1fr;
+}
+.adjust-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* "(when fitting)", "(optional)" — the part of a label that says when a
+   field matters, quieter than the field's name. */
+.opt { font-weight: 400; color: var(--g4); text-transform: none; letter-spacing: 0; }
+
+/* Stock going out reads differently from stock coming in at a glance,
+   which is what makes a history column scannable rather than readable. */
+.delta-in { font-weight: 700; }
+.delta-out { font-weight: 700; color: var(--flag); }
+
+.form-panel { padding: 16px 18px; margin-bottom: 22px; }
+.form-panel .grid2 { margin-bottom: 12px; }
+.grid-wide { grid-column: 1 / -1; }
+.form-status { margin-left: 12px; font-size: 13px; color: var(--flag); }
+
+.car-sub { display: block; font-size: 12px; color: var(--g4); margin-top: 2px; }
+.strong { font-weight: 700; }
+tbody tr.row-flag td { background: var(--flag-bg); }
+.pill.muted { color: var(--g4); border-color: var(--g2); }
+
+@media (max-width: 720px) {
+  .adjust-grid { grid-template-columns: 1fr; }
+  .scanned-head { flex-direction: column; }
+  .scanned-qty { margin-left: 0; text-align: left; }
+}

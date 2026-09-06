@@ -24,21 +24,29 @@ const html = fs.readFileSync(path.join(ASSETS, 'index.html'), 'utf8');
 const ids = [...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
 const hiddenIds = new Set([...html.matchAll(/id="([^"]+)"[^>]*\shidden/g)].map((m) => m[1]));
 
-const el = (id) => ({
+const el = (id) => {
+  const listeners = {};
+  return {
   id, textContent: '', innerHTML: '', value: '', hidden: hiddenIds.has(id),
   dataset: {}, style: {},
   classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
-  addEventListener() {}, setAttribute() {}, removeAttribute() {},
+  addEventListener(ev, fn) { (listeners[ev] ??= []).push(fn); },
+  fire(ev, arg) { (listeners[ev] || []).forEach((fn) => fn(arg || {})); },
+  setAttribute() {}, removeAttribute() {},
   appendChild() {}, removeChild() {}, remove() {}, insertAdjacentHTML() {},
   scrollIntoView() {}, focus() {}, blur() {},
   querySelectorAll: () => [], querySelector: () => null, closest: () => null,
   isConnected: true, clientWidth: 1200,
-});
+  };
+};
 
 /** Loads the whole dashboard fresh in its own vm context, as if <body>
     carried the given data-role (or none at all, for the "admin" default),
     and returns what ended up in #tabs and #subtabs. */
-function loadWithRole(role) {
+let navigatedTo = '';
+
+function loadWithRole(role, siblings = {}) {
+  navigatedTo = '';
   const store = {};
   ids.forEach((i) => { store[i] = el(i); });
   ['c-invoices', 'c-vehicles', 'c-parts', 'c-suppliers', 'c-training', 'c-exports']
@@ -46,6 +54,8 @@ function loadWithRole(role) {
 
   const body = el('body');
   if (role) body.dataset.role = role;
+  if (siblings.parts) body.dataset.parts = siblings.parts;
+  if (siblings.rentals) body.dataset.rentals = siblings.rentals;
 
   const errors = [];
   const ctx = vm.createContext({
@@ -56,7 +66,7 @@ function loadWithRole(role) {
       addEventListener() {}, createElement: () => el('tmp'), body, cookie: '', activeElement: null,
     },
     window: { addEventListener() {}, location: { href: '' } },
-    location: { href: '' },
+    location: { set href(v) { navigatedTo = v; }, get href() { return navigatedTo; } },
     ResizeObserver: class { observe() {} },
     setTimeout: () => 0, setInterval: () => 0, clearTimeout() {}, clearInterval() {},
     fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
@@ -74,7 +84,10 @@ function loadWithRole(role) {
     }
   }
 
-  return { errors, tabs: store['tabs'].innerHTML, subtabs: store['subtabs'].innerHTML };
+  return {
+    errors, ctx, store, body,
+    tabs: store['tabs'].innerHTML, subtabs: store['subtabs'].innerHTML,
+  };
 }
 
 let failed = false;
@@ -105,5 +118,33 @@ ok(admin.errors.length === 0, 'admin role: every dashboard script loads without 
 ok(admin.tabs.includes('Setup'), 'admin role: the "Setup" group is still the top-level tab');
 ok(admin.subtabs.includes('Fleet') && admin.subtabs.includes('Training') && admin.subtabs.includes('Admin'),
   'admin role: Fleet, Training and Admin are all reachable as Setup\'s subtabs');
+
+// ── the two links out to the sibling sites ──────────────────────────────
+
+const SIBLINGS = { parts: '//parts.example.co.uk', rentals: '//rentals.example.co.uk' };
+
+for (const role of ['admin', 'fleet']) {
+  const w = loadWithRole(role === 'admin' ? null : role, SIBLINGS);
+  ok(w.errors.length === 0, `${role}: scripts load with the sibling URLs stamped: ` + w.errors.join('; '));
+  ok(w.tabs.includes('Parts'), `${role}: the parts store appears as a tab`);
+  ok(w.tabs.includes(`data-external="${SIBLINGS.parts}"`),
+    `${role}: that tab links out to the parts subdomain rather than switching view`);
+  // It is the last tab — the fifth, after the four this app renders itself.
+  const labels = [...w.tabs.matchAll(/>\s*([A-Za-z ]+?)\s*(?:↗|<)/g)].map((m) => m[1].trim()).filter(Boolean);
+  ok(labels[labels.length - 1] === 'Parts',
+    `${role}: it is the last tab in the row, got ${JSON.stringify(labels)}`);
+}
+
+// A dead tab is worse than no tab: without the server telling the page
+// where the parts store lives, it is not offered at all.
+const noSiblings = loadWithRole(null);
+ok(!noSiblings.tabs.includes('data-external'),
+  'with no parts URL stamped, no external tab is rendered');
+
+// The Rentals button in the top bar goes to the rentals subdomain.
+const w = loadWithRole(null, SIBLINGS);
+w.store['btn-rentals'].fire('click');
+ok(navigatedTo === SIBLINGS.rentals,
+  'the Rentals button navigates to the rentals subdomain, got ' + JSON.stringify(navigatedTo));
 
 process.exit(failed ? 1 : 0);

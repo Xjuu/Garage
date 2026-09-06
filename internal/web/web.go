@@ -169,6 +169,7 @@ func (s *Server) Listen(ctx context.Context, addr string) error {
 	// looking at the Host header on every request.
 	repairsMux := s.repairsRoutes(sub)
 	rentalsMux := s.rentalsRoutes(sub)
+	partsMux := s.partsRoutes(sub)
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
 		if h, _, err := net.SplitHostPort(host); err == nil {
@@ -179,6 +180,8 @@ func (s *Server) Listen(ctx context.Context, addr string) error {
 			repairsMux.ServeHTTP(w, r)
 		case strings.HasPrefix(host, "rentals."):
 			rentalsMux.ServeHTTP(w, r)
+		case strings.HasPrefix(host, "parts."):
+			partsMux.ServeHTTP(w, r)
 		default:
 			mux.ServeHTTP(w, r)
 		}
@@ -326,43 +329,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	authed := s.auth.IsAuthenticated(r)
-	page := "assets/index.html"
-	if !authed {
-		page = "assets/login.html"
-	}
-	b, err := assets.ReadFile(page)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if authed {
-		// The signed-in account's role, and whether it's a TOTP-exempt
-		// and/or read-only shared login, stamped onto <body> so app.js can
-		// gate its nav, block mutating calls client-side, and show the
-		// "temporary account" banner without an extra round trip — see the
-		// GROUPS comment and api() in app.js. Role defaults to admin for
-		// "no password configured" mode, which has no real session to read
-		// a role from and is already wide open to everyone.
-		role := store.RoleAdmin
-		temp, readOnly := false, false
-		if u, ok := s.auth.CurrentUser(r); ok {
-			role = u.Role
-			temp = u.TOTPExempt
-			readOnly = u.ReadOnly
-		}
-		attrs := `data-role="` + role + `"`
-		if temp {
-			attrs += ` data-temp="true"`
-		}
-		if readOnly {
-			attrs += ` data-readonly="true"`
-		}
-		b = []byte(strings.Replace(string(b), "<body>", "<body "+attrs+">", 1))
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write(versionAssets(b))
+	s.serveAppPage(w, r, "assets/index.html")
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

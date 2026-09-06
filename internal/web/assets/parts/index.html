@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Goldstar — Parts store</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/parts/parts.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='black'/><text x='16' y='23' font-size='20' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>P</text></svg>">
+</head>
+<body>
+
+<div class="temp-banner" data-when="temp">This is a shared, temporary account — no two-factor authentication, and its password is not private to one person.</div>
+<div class="temp-banner" data-when="readonly">View-only account — nothing here can be changed, added or deleted.</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="brand-mark">P</span> Parts store</div>
+    <div class="spacer"></div>
+    <button class="btn" id="btn-logout" title="Sign out">Sign out</button>
+  </div>
+  <nav class="tabs" role="tablist" id="tabs">
+    <button role="tab" data-view="counter" aria-selected="true">Counter</button>
+    <button role="tab" data-view="shelf" aria-selected="false">Shelf</button>
+    <button role="tab" data-view="history" aria-selected="false">History</button>
+  </nav>
+</header>
+
+<main>
+  <!-- Counter: the scanner drives everything here -->
+  <section class="view active" id="view-counter">
+    <div class="view-head"><h2>Counter</h2>
+      <span class="sub">Scan a barcode, or type it and press Return.</span></div>
+
+    <div class="scan-wrap">
+      <input type="text" id="scan" autocomplete="off" autocapitalize="off" spellcheck="false"
+             placeholder="Scan a barcode…" aria-label="Barcode">
+      <div class="scan-hint" id="scan-hint">The scanner types the code and presses Return for you.</div>
+    </div>
+
+    <div class="tiles" id="stock-tiles"></div>
+
+    <!-- The scanned part, hidden until something is scanned -->
+    <div id="scanned" hidden>
+      <div class="panel scanned-card">
+        <div class="scanned-head">
+          <div>
+            <div class="scanned-part" id="sc-part"></div>
+            <div class="scanned-desc" id="sc-desc"></div>
+            <div class="scanned-meta" id="sc-meta"></div>
+          </div>
+          <div class="scanned-qty">
+            <div class="k">On the shelf</div>
+            <div class="v" id="sc-qty">0</div>
+            <div class="m" id="sc-low"></div>
+          </div>
+        </div>
+
+        <div class="adjust-grid">
+          <div class="field"><label for="ad-qty">How many</label>
+            <input type="number" id="ad-qty" min="0" step="1" value="1"></div>
+          <div class="field"><label for="ad-reg">For which car <span class="opt">(when fitting)</span></label>
+            <input type="text" id="ad-reg" placeholder="AB12 CDE" autocomplete="off"></div>
+          <div class="field"><label for="ad-note">Note <span class="opt">(optional)</span></label>
+            <input type="text" id="ad-note" autocomplete="off"></div>
+        </div>
+        <div class="adjust-actions">
+          <button class="btn solid" id="ad-take">Take off the shelf</button>
+          <button class="btn" id="ad-add">Put on the shelf</button>
+          <button class="btn" id="ad-correct">Correct the count</button>
+        </div>
+        <div class="login-err" id="ad-err" role="alert"></div>
+      </div>
+
+      <div class="section-title">Recent movements for this part</div>
+      <div class="panel"><div class="table-scroll">
+        <table><thead><tr>
+          <th>When</th><th class="num">Change</th><th>Why</th><th>Car</th><th>Who</th><th>Note</th>
+        </tr></thead><tbody id="sc-moves"></tbody></table>
+      </div></div>
+    </div>
+
+    <!-- Unknown barcode: offer to add it, prefilled -->
+    <div class="panel form-panel" id="new-part" hidden>
+      <div class="section-title" style="margin-top:0">Not on file — add it</div>
+      <div class="grid2">
+        <div class="field"><label for="np-barcode">Barcode</label>
+          <input type="text" id="np-barcode" readonly></div>
+        <div class="field"><label for="np-number">Part number</label>
+          <input type="text" id="np-number" autocomplete="off"></div>
+        <div class="field grid-wide"><label for="np-desc">Description</label>
+          <input type="text" id="np-desc" placeholder="Front brake pads" autocomplete="off"></div>
+        <div class="field"><label for="np-qty">Opening quantity</label>
+          <input type="number" id="np-qty" min="0" step="1" value="0"></div>
+        <div class="field"><label for="np-min">Reorder at</label>
+          <input type="number" id="np-min" min="0" step="1" value="0"></div>
+        <div class="field"><label for="np-cost">Unit cost (£)</label>
+          <input type="number" id="np-cost" min="0" step="0.01" value="0"></div>
+        <div class="field"><label for="np-loc">Shelf / bin</label>
+          <input type="text" id="np-loc" autocomplete="off"></div>
+        <div class="field"><label for="np-make">Only fits make <span class="opt">(blank = anything)</span></label>
+          <input type="text" id="np-make" placeholder="Toyota" autocomplete="off"></div>
+        <div class="field"><label for="np-model">Only fits model <span class="opt">(blank = any of that make)</span></label>
+          <input type="text" id="np-model" placeholder="Corolla" autocomplete="off"></div>
+      </div>
+      <button class="btn solid" id="np-add">Add to the shelf</button>
+      <span class="form-status" id="np-err"></span>
+    </div>
+  </section>
+
+  <!-- Shelf -->
+  <section class="view" id="view-shelf">
+    <div class="view-head"><h2>Shelf</h2>
+      <span class="sub">Everything stocked. Anything at or below its reorder level comes first.</span></div>
+    <div class="search-wrap" style="margin-bottom:14px;max-width:420px">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      <input type="search" id="shelf-filter" placeholder="Barcode, part number, description or fitment…">
+    </div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Part</th><th>Barcode</th><th>Fits</th><th>Where</th>
+        <th class="num">On shelf</th><th class="num">Reorder at</th><th class="num">Value</th><th></th>
+      </tr></thead><tbody id="shelf-rows"></tbody></table>
+    </div></div>
+  </section>
+
+  <!-- History -->
+  <section class="view" id="view-history">
+    <div class="view-head"><h2>History</h2>
+      <span class="sub">Every movement across the whole store, newest first.</span></div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>When</th><th>Part</th><th class="num">Change</th><th>Why</th><th>Car</th><th>Who</th><th>Note</th>
+      </tr></thead><tbody id="history-rows"></tbody></table>
+    </div></div>
+  </section>
+</main>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="/static/parts/app.js"></script>
+</body>
+</html>

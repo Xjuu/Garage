@@ -361,6 +361,51 @@ CREATE TABLE IF NOT EXISTS rental_agreements (
 
 CREATE INDEX IF NOT EXISTS idx_rental_agreements_vehicle ON rental_agreements(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_rental_agreements_dates   ON rental_agreements(starts_on, ends_on);
+
+-- Parts store ---------------------------------------------------------------
+
+-- Physical stock on the shelf, keyed by the barcode stuck to the box. This
+-- is deliberately not invoice_items: that table is what was bought and what
+-- it cost, one row per line of paper, and it never changes once extracted.
+-- This is what is on the shelf right now, which changes every time someone
+-- takes something off it.
+CREATE TABLE IF NOT EXISTS stock_parts (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  barcode      TEXT NOT NULL UNIQUE,
+  part_number  TEXT NOT NULL DEFAULT '',
+  description  TEXT NOT NULL DEFAULT '',
+  quantity     REAL NOT NULL DEFAULT 0,
+  -- The level at which the shelf is worth restocking. Zero means nobody has
+  -- said, so nothing is ever reported low.
+  min_quantity REAL NOT NULL DEFAULT 0,
+  location     TEXT NOT NULL DEFAULT '',
+  unit_cost    REAL NOT NULL DEFAULT 0,
+  -- Fitment. Empty fits_make means the part goes on anything (oil, bulbs,
+  -- wiper blades); a make with an empty fits_model means any car of that
+  -- make. Checked against the fleet registry whenever a part is taken out
+  -- for a specific car — see AdjustStock.
+  fits_make    TEXT NOT NULL DEFAULT '',
+  fits_model   TEXT NOT NULL DEFAULT '',
+  notes        TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL
+);
+
+-- Every change to a shelf quantity, and who made it. The running quantity
+-- on stock_parts could be derived by summing this, but is kept alongside it
+-- so a scan at the counter is one read rather than an aggregate over the
+-- whole history of that part.
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  part_id     INTEGER NOT NULL REFERENCES stock_parts(id) ON DELETE CASCADE,
+  delta       REAL NOT NULL,
+  reason      TEXT NOT NULL DEFAULT '',
+  vehicle_reg TEXT NOT NULL DEFAULT '',
+  by_user     TEXT NOT NULL DEFAULT '',
+  note        TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_movements_part ON stock_movements(part_id);
 `
 
 // seed inserts the fleet the user actually operates. Overall Clients is the

@@ -179,6 +179,17 @@ const GROUPS = [
     : { id: 'setup', label: 'Fleet', views: [['fleet', 'Fleet']] },
 ];
 
+// The parts store is its own site on its own subdomain, so it joins the nav
+// as a fifth tab that leaves rather than a view this app can render. Only
+// added when the server actually told us where it lives — a dead tab is
+// worse than no tab.
+if (document.body.dataset.parts) {
+  // views stays empty: everything that walks GROUPS (groupOf, buildNav's
+  // subtab row) reads it, and an external tab has no view of its own for
+  // this app to switch to.
+  GROUPS.push({ id: 'parts-store', label: 'Parts', views: [], external: document.body.dataset.parts });
+}
+
 // Detail pages are reached by clicking a row, not from the nav, but they still
 // need to light up the group they belong to.
 const EXTRA_VIEWS = { vehicle: 'analysis', part: 'analysis' };
@@ -188,7 +199,9 @@ for (const g of GROUPS) for (const [view] of g.views) groupOf[view] = g.id;
 Object.assign(groupOf, EXTRA_VIEWS);
 
 function buildNav() {
-  $('tabs').innerHTML = GROUPS.map((g) => `
+  $('tabs').innerHTML = GROUPS.map((g) => g.external
+    ? `<button role="tab" data-external="${esc(g.external)}">${esc(g.label)} ↗</button>`
+    : `
     <button role="tab" data-group="${g.id}" data-view="${g.views[0][0]}">
       ${esc(g.label)}${g.count ? `<span class="count" id="${g.count}">0</span>` : ''}
     </button>`).join('');
@@ -204,7 +217,12 @@ function buildNav() {
       </button>`).join('')).join('');
 
   document.querySelectorAll('#tabs button, #subtabs button').forEach((b) =>
-    b.addEventListener('click', () => show(b.dataset.view)));
+    b.addEventListener('click', () => {
+      // An external tab leaves this app entirely; show() has no view to
+      // switch to for one.
+      if (b.dataset.external) { location.href = b.dataset.external; return; }
+      show(b.dataset.view);
+    }));
 }
 
 // Every view actually shown gets remembered, so Escape can step back through
@@ -697,6 +715,9 @@ document.addEventListener('keydown', (e) => {
   if ($('drawer').classList.contains('open')) return;
   if (!$('gen-modal').hidden || !$('files-modal').hidden) return;
 
+  if (e.key === '5' && document.body.dataset.parts) {
+    e.preventDefault(); location.href = document.body.dataset.parts; return;
+  }
   if (TOP_SHORTCUT_KEYS[e.key]) { e.preventDefault(); show(TOP_SHORTCUT_KEYS[e.key]); return; }
 
   // Section shortcuts never share a letter with S/U/G (see SECTION_SHORTCUTS),
@@ -1034,6 +1055,10 @@ dz.addEventListener('click', () => $('file-input').click());
 // The arrow defers the lookup to click time, by which point every script has run.
 $('btn-sheet').addEventListener('click', () => openGenerate());
 $('btn-files').addEventListener('click', () => openFiles());
+
+$('btn-rentals').addEventListener('click', () => {
+  if (document.body.dataset.rentals) location.href = document.body.dataset.rentals;
+});
 
 $('btn-logout').addEventListener('click', async () => {
   try { await api('/api/logout', { method: 'POST' }); } catch {}

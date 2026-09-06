@@ -33,6 +33,10 @@
     <button class="btn" id="btn-sheet">Generate spreadsheet</button>
     <button class="btn hide-sm" id="btn-files">Saved files<span class="count" id="c-exports">0</span></button>
     <button class="btn" id="btn-logout" title="Sign out">Sign out</button>
+    <!-- Far right of the bar: a link out to the hire desk, which is its own
+         site on its own subdomain. The URL is stamped on <body> by the
+         server (see siblingHost) rather than hardcoded here. -->
+    <button class="btn" id="btn-rentals" title="Open the rentals site">Rentals ↗</button>
     <input type="file" id="file-input" multiple hidden
            accept=".pdf,.png,.jpg,.jpeg,.webp,.heic">
   </div>
@@ -679,6 +683,7 @@
   <span class="chip"><kbd>2</kbd> Invoices</span>
   <span class="chip"><kbd>3</kbd> Analysis</span>
   <span class="chip"><kbd>4</kbd> Setup</span>
+  <span class="chip"><kbd>5</kbd> Parts</span>
   <span class="chip"><kbd>Esc</kbd> Back</span>
   <!-- Filled in by renderSectionShortcuts() with the current section's own
        subtab shortcuts (Analysis, Setup) — empty and invisible everywhere
