@@ -1,0 +1,64 @@
+/* Rentals — only what app.css doesn't already provide. Everything
+   structural (tiles, panels, tables, chips, drawer, toasts, buttons) is
+   deliberately inherited from the dashboard's own stylesheet so the two
+   sites read as one system rather than two that merely look similar. */
+
+/* A form that lives inside a panel rather than a drawer: the dashboard's
+   own "Add a vehicle" block uses these paddings inline, which is fine once
+   but not three times over. */
+.form-panel { padding: 16px 18px; margin-bottom: 22px; }
+.form-panel .grid2 { margin-bottom: 12px; }
+
+/* Spans the pair of columns for a field that needs the room — an address
+   next to a licence number reads badly cut in half. */
+.grid-wide { grid-column: 1 / -1; }
+
+/* Inline validation next to the button that caused it, rather than a toast
+   that fades before it has been read. */
+.form-status {
+  margin-left: 12px; font-size: 13px; color: var(--flag);
+}
+
+/* The make and model under a registration: present but secondary, since
+   the plate is what anyone actually matches against a set of keys. */
+.car-sub {
+  display: block; font-size: 12px; color: var(--g4); margin-top: 2px;
+}
+
+/* A whole row worth noticing — an overdue hire is the one thing on this
+   page that needs chasing today. */
+tbody tr.row-flag td { background: var(--flag-bg); }
+tbody tr.row-muted td { color: var(--g4); }
+
+/* Two more pill weights than the dashboard needed: a filled one for "this
+   is happening now" and a flat one for states that are simply history. */
+.pill.solid {
+  background: var(--ink); color: var(--paper); border-color: var(--ink);
+}
+.pill.muted { color: var(--g4); border-color: var(--g2); }
+
+/* Status is changed in place in the pool table — a dropdown in the cell
+   beats a modal for a three-way choice that is flipped often. */
+.inline-select {
+  width: auto; min-width: 130px; padding: 5px 9px;
+  font-size: 13px; border-radius: var(--radius-sm);
+}
+
+/* The running commentary under the date pair in the new-hire drawer: how
+   many days, how many cars are free, or why the dates don't work. */
+.hire-hint {
+  font-size: 12.5px; color: var(--g4); margin: -4px 0 18px;
+}
+
+.hire-total {
+  margin-top: 18px; padding: 12px 14px;
+  border: 1px solid var(--g2); border-radius: var(--radius);
+  background: var(--g05); font-size: 14px;
+}
+.hire-total:empty { display: none; }
+.hire-total strong { font-size: 16px; }
+
+/* app.css scopes .strong to table cells; these pages also use it on a span
+   inside a cell (a customer's name above their number), which that
+   selector doesn't reach. */
+.strong { font-weight: 700; }

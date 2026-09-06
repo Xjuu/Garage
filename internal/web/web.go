@@ -168,16 +168,20 @@ func (s *Server) Listen(ctx context.Context, addr string) error {
 	// here, after the TLS/host information has already reached us, by
 	// looking at the Host header on every request.
 	repairsMux := s.repairsRoutes(sub)
+	rentalsMux := s.rentalsRoutes(sub)
 	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			host = h
 		}
-		if strings.HasPrefix(host, "repairs.") {
+		switch {
+		case strings.HasPrefix(host, "repairs."):
 			repairsMux.ServeHTTP(w, r)
-			return
+		case strings.HasPrefix(host, "rentals."):
+			rentalsMux.ServeHTTP(w, r)
+		default:
+			mux.ServeHTTP(w, r)
 		}
-		mux.ServeHTTP(w, r)
 	})
 
 	srv := &http.Server{

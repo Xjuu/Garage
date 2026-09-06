@@ -299,6 +299,68 @@ CREATE TABLE IF NOT EXISTS users (
   read_only            INTEGER NOT NULL DEFAULT 0,
   created_at           TEXT NOT NULL
 );
+
+-- Rentals -------------------------------------------------------------------
+
+-- Someone who takes a car out. Deliberately its own table rather than
+-- anything to do with 'companies': a company here owns taxis we repair, a
+-- rental customer is a person we hand keys to, and conflating the two would
+-- put customer PII in a table the whole dashboard already reads freely.
+CREATE TABLE IF NOT EXISTS rental_customers (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  phone      TEXT NOT NULL DEFAULT '',
+  email      TEXT NOT NULL DEFAULT '',
+  address    TEXT NOT NULL DEFAULT '',
+  licence_no TEXT NOT NULL DEFAULT '',
+  notes      TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
+-- The hire pool. Separate from 'vehicles' on purpose: that table is the
+-- taxi fleet whose repair spend the dashboard reports on, and a courtesy
+-- car we lend out is not one of those — it would otherwise show up in every
+-- per-vehicle cost breakdown as a car that never earns anything.
+CREATE TABLE IF NOT EXISTS rental_vehicles (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  registration TEXT NOT NULL UNIQUE,
+  make         TEXT NOT NULL DEFAULT '',
+  model        TEXT NOT NULL DEFAULT '',
+  year         TEXT NOT NULL DEFAULT '',
+  colour       TEXT NOT NULL DEFAULT '',
+  daily_rate   REAL NOT NULL DEFAULT 0,
+  -- available | maintenance | retired. Only 'available' cars can be booked;
+  -- the other two exist so a car off the road stops being offered without
+  -- having to delete it and lose its hire history.
+  status       TEXT NOT NULL DEFAULT 'available',
+  notes        TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL
+);
+
+-- One hire: who has which car, from when, until when. starts_on/ends_on are
+-- what was agreed; returned_on is what actually happened, left empty until
+-- the keys come back, which is what makes "out now" and "overdue" answerable
+-- without a second table of events.
+CREATE TABLE IF NOT EXISTS rental_agreements (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  vehicle_id  INTEGER NOT NULL REFERENCES rental_vehicles(id),
+  customer_id INTEGER NOT NULL REFERENCES rental_customers(id),
+  starts_on   TEXT NOT NULL,
+  ends_on     TEXT NOT NULL,
+  returned_on TEXT NOT NULL DEFAULT '',
+  -- booked | out | returned | cancelled. Only booked and out hold a car
+  -- against its dates — see rentalOverlapClause, which is the single place
+  -- that decides whether two hires collide.
+  status      TEXT NOT NULL DEFAULT 'booked',
+  -- Snapshotted from the vehicle when the hire is created, so re-pricing the
+  -- car later never silently rewrites what an existing agreement was worth.
+  daily_rate  REAL NOT NULL DEFAULT 0,
+  notes       TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rental_agreements_vehicle ON rental_agreements(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_rental_agreements_dates   ON rental_agreements(starts_on, ends_on);
 `
 
 // seed inserts the fleet the user actually operates. Overall Clients is the

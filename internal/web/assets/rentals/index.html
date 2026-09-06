@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Goldstar — Rentals</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/rentals/rentals.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='black'/><text x='16' y='23' font-size='20' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>R</text></svg>">
+</head>
+<body>
+
+<!-- Same two lines the dashboard carries, shown by the same CSS rules off
+     <body data-temp>/<body data-readonly> that handleRentalsRoot stamps. -->
+<div class="temp-banner" data-when="temp">This is a shared, temporary account — no two-factor authentication, and its password is not private to one person.</div>
+<div class="temp-banner" data-when="readonly">View-only account — nothing here can be changed, added or deleted.</div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="brand-mark">R</span> Goldstar Rentals</div>
+    <div class="spacer"></div>
+    <button class="btn solid" id="btn-new-hire">New hire</button>
+    <button class="btn" id="btn-logout" title="Sign out">Sign out</button>
+  </div>
+  <nav class="tabs" role="tablist" id="tabs">
+    <button role="tab" data-view="today" aria-selected="true">Today</button>
+    <button role="tab" data-view="hires" aria-selected="false">Hires</button>
+    <button role="tab" data-view="cars" aria-selected="false">Cars</button>
+    <button role="tab" data-view="customers" aria-selected="false">Customers</button>
+  </nav>
+</header>
+
+<main>
+  <!-- Today -->
+  <section class="view active" id="view-today">
+    <div class="view-head"><h2>Today</h2>
+      <span class="sub">What is out, what is late, and what is free right now.</span></div>
+    <div class="tiles" id="today-tiles"></div>
+
+    <div class="section-title">Out now</div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Customer</th><th>Car</th><th>Out since</th><th>Due back</th>
+        <th class="num">Days</th><th class="num">Total</th><th></th>
+      </tr></thead><tbody id="out-rows"></tbody></table>
+    </div></div>
+
+    <div class="section-title">Starting soon</div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Customer</th><th>Car</th><th>From</th><th>Until</th><th></th>
+      </tr></thead><tbody id="upcoming-rows"></tbody></table>
+    </div></div>
+  </section>
+
+  <!-- Hires -->
+  <section class="view" id="view-hires">
+    <div class="view-head"><h2>Hires</h2>
+      <span class="sub">Every agreement, newest first.</span></div>
+    <div class="chips" id="hire-filters">
+      <button class="chip" data-status="" aria-pressed="true">All</button>
+      <button class="chip" data-status="booked" aria-pressed="false">Booked</button>
+      <button class="chip" data-status="out" aria-pressed="false">Out</button>
+      <button class="chip" data-status="returned" aria-pressed="false">Returned</button>
+      <button class="chip" data-status="cancelled" aria-pressed="false">Cancelled</button>
+    </div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Customer</th><th>Car</th><th>From</th><th>Until</th>
+        <th>Status</th><th class="num">Days</th><th class="num">Total</th><th></th>
+      </tr></thead><tbody id="hire-rows"></tbody></table>
+    </div></div>
+  </section>
+
+  <!-- Cars -->
+  <section class="view" id="view-cars">
+    <div class="view-head"><h2>Hire cars</h2>
+      <span class="sub">The rental pool — separate from the workshop's own fleet registry.</span></div>
+
+    <div class="section-title">Add a car</div>
+    <div class="panel form-panel">
+      <div class="grid2">
+        <div class="field"><label for="nc-reg">Registration</label>
+          <input type="text" id="nc-reg" placeholder="AB12 CDE" autocomplete="off"></div>
+        <div class="field"><label for="nc-make">Make</label>
+          <input type="text" id="nc-make" placeholder="Toyota" autocomplete="off"></div>
+        <div class="field"><label for="nc-model">Model</label>
+          <input type="text" id="nc-model" placeholder="Corolla" autocomplete="off"></div>
+        <div class="field"><label for="nc-colour">Colour</label>
+          <input type="text" id="nc-colour" placeholder="Silver" autocomplete="off"></div>
+        <div class="field"><label for="nc-rate">Daily rate (£)</label>
+          <input type="number" id="nc-rate" min="0" step="0.01" placeholder="45.00"></div>
+        <div class="field"><label for="nc-status">Status</label>
+          <select id="nc-status">
+            <option value="available">Available</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="retired">Retired</option>
+          </select></div>
+      </div>
+      <button class="btn solid" id="nc-add">Add to pool</button>
+      <span class="form-status" id="nc-status-msg"></span>
+    </div>
+
+    <div class="section-title">The pool</div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Car</th><th>Colour</th><th class="num">Daily rate</th>
+        <th>Status</th><th></th>
+      </tr></thead><tbody id="car-rows"></tbody></table>
+    </div></div>
+  </section>
+
+  <!-- Customers -->
+  <section class="view" id="view-customers">
+    <div class="view-head"><h2>Customers</h2>
+      <span class="sub">Everyone who has taken a car out.</span></div>
+
+    <div class="section-title">Add a customer</div>
+    <div class="panel form-panel">
+      <div class="grid2">
+        <div class="field"><label for="ncu-name">Name</label>
+          <input type="text" id="ncu-name" placeholder="Alex Rider" autocomplete="off"></div>
+        <div class="field"><label for="ncu-phone">Mobile</label>
+          <input type="tel" id="ncu-phone" placeholder="+44 7700 900123" autocomplete="off"></div>
+        <div class="field"><label for="ncu-email">Email</label>
+          <input type="text" id="ncu-email" placeholder="alex@example.com" autocomplete="off"></div>
+        <div class="field"><label for="ncu-licence">Driving licence no.</label>
+          <input type="text" id="ncu-licence" autocomplete="off"></div>
+        <div class="field grid-wide"><label for="ncu-address">Address</label>
+          <input type="text" id="ncu-address" autocomplete="off"></div>
+      </div>
+      <button class="btn solid" id="ncu-add">Add customer</button>
+      <span class="form-status" id="ncu-status-msg"></span>
+    </div>
+
+    <div class="search-wrap" style="margin-bottom:14px;max-width:380px">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      <input type="search" id="cu-filter" placeholder="Find a customer…">
+    </div>
+    <div class="panel"><div class="table-scroll">
+      <table><thead><tr>
+        <th>Name</th><th>Mobile</th><th>Email</th><th>Licence</th>
+        <th class="num">Hires</th><th></th>
+      </tr></thead><tbody id="customer-rows"></tbody></table>
+    </div></div>
+  </section>
+</main>
+
+<!-- New hire -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="hire-drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <h3>New hire</h3>
+    <div class="spacer"></div>
+    <button class="btn sm" id="hire-close">Close</button>
+  </div>
+  <div class="drawer-body">
+    <div class="section-title">1 · Dates</div>
+    <div class="grid2">
+      <div class="field"><label for="h-from">From</label>
+        <input type="date" id="h-from"></div>
+      <div class="field"><label for="h-to">Until</label>
+        <input type="date" id="h-to"></div>
+    </div>
+    <div class="hire-hint" id="h-dates-hint">Pick both dates to see which cars are free.</div>
+
+    <div class="section-title">2 · Car</div>
+    <div class="field">
+      <select id="h-car"><option value="">— pick dates first —</option></select>
+    </div>
+
+    <div class="section-title">3 · Customer</div>
+    <div class="field">
+      <select id="h-customer"><option value="">— choose a customer —</option></select>
+    </div>
+    <div class="hire-hint">No account yet? Add them under Customers first.</div>
+
+    <div class="section-title">Notes</div>
+    <div class="field"><input type="text" id="h-notes" placeholder="optional" autocomplete="off"></div>
+
+    <div class="hire-total" id="h-total"></div>
+    <div class="login-err" id="h-err" role="alert"></div>
+  </div>
+  <div class="drawer-foot">
+    <button class="btn solid" id="h-save">Book it</button>
+  </div>
+</aside>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="/static/rentals/app.js"></script>
+</body>
+</html>
