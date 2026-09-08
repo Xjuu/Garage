@@ -1242,3 +1242,108 @@ func (s *Store) DeleteRentalDocument(id int64) (storedPath string, err error) {
 	_, err = s.db.Exec(`DELETE FROM rental_documents WHERE id = ?`, id)
 	return storedPath, err
 }
+
+// ── today's jobs ──────────────────────────────────────────────────────────
+
+// RentalToday is what actually needs doing, rather than what exists. The
+// hire desk's morning is these three lists and nothing else: who is late,
+// who is bringing one back, and who is collecting one.
+type RentalToday struct {
+	Overdue   []RentalAgreementView `json:"overdue"`
+	DueToday  []RentalAgreementView `json:"due_today"`
+	GoingOut  []RentalAgreementView `json:"going_out"`
+	StartedAt string                `json:"today"`
+}
+
+func (s *Store) RentalToday() (*RentalToday, error) {
+	today := time.Now().Format("2006-01-02")
+	out := &RentalToday{StartedAt: today}
+
+	q := func(where string, args ...any) ([]RentalAgreementView, error) {
+		rows, err := s.db.Query(rentalAgreementView+" WHERE "+where+" ORDER BY a.ends_on, a.id", args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		list := []RentalAgreementView{}
+		for rows.Next() {
+			a, err := scanRentalAgreementView(rows.Scan)
+			if err != nil {
+				return nil, err
+			}
+			list = append(list, *a)
+		}
+		return list, rows.Err()
+	}
+
+	var err error
+	if out.Overdue, err = q("a.status = 'out' AND a.ends_on < ?", today); err != nil {
+		return nil, err
+	}
+	if out.DueToday, err = q("a.status = 'out' AND a.ends_on = ?", today); err != nil {
+		return nil, err
+	}
+	// Booked to start today or earlier and never collected — a car someone
+	// is expected to walk in for, which is as much a job as a return.
+	if out.GoingOut, err = q("a.status = 'booked' AND a.starts_on <= ?", today); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ── calendar ──────────────────────────────────────────────────────────────
+
+// RentalCalendarView is every car and every hire touching a window of
+// dates: one row per car, laid out by whoever draws it. Cancelled hires are
+// left out — they hold no car and drawing them would imply otherwise.
+type RentalCalendarView struct {
+	From  string                `json:"from"`
+	To    string                `json:"to"`
+	Cars  []RentalVehicle       `json:"cars"`
+	Hires []RentalAgreementView `json:"hires"`
+}
+
+func (s *Store) RentalCalendar(from, to string) (*RentalCalendarView, error) {
+	if !isoDate(from) || !isoDate(to) {
+		return nil, fmt.Errorf("a start and end date are required")
+	}
+	if to < from {
+		return nil, fmt.Errorf("the end date cannot be before the start date")
+	}
+
+	cars, err := s.RentalVehicles()
+	if err != nil {
+		return nil, err
+	}
+	// Retired cars are not part of any future plan, so they are not rows on
+	// a planning grid.
+	live := make([]RentalVehicle, 0, len(cars))
+	for _, c := range cars {
+		if c.Status != RentalRetired {
+			live = append(live, c)
+		}
+	}
+
+	// The same overlap test booking uses: a hire touches the window if it
+	// starts before the window ends and ends after the window starts.
+	rows, err := s.db.Query(rentalAgreementView+`
+		WHERE a.status <> 'cancelled' AND a.starts_on <= ? AND a.ends_on >= ?
+		ORDER BY a.starts_on`, to, from)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	hires := []RentalAgreementView{}
+	for rows.Next() {
+		a, err := scanRentalAgreementView(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		hires = append(hires, *a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return &RentalCalendarView{From: from, To: to, Cars: live, Hires: hires}, nil
+}

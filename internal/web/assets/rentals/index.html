@@ -16,31 +16,41 @@
 <div class="temp-banner" data-when="temp">This is a shared, temporary account — no two-factor authentication, and its password is not private to one person.</div>
 <div class="temp-banner" data-when="readonly">View-only account — nothing here can be changed, added or deleted.</div>
 
-<header class="topbar">
-  <div class="topbar-inner">
-    <div class="brand"><span class="brand-mark">R</span> Goldstar Rentals</div>
-    <div class="spacer"></div>
-    <button class="btn" id="btn-logout" title="Sign out">Sign out</button>
-  </div>
-  <nav class="tabs" role="tablist" id="tabs">
-    <button role="tab" data-view="today" aria-selected="true">Today</button>
-    <button role="tab" data-view="courtesy" aria-selected="false">Courtesy cars</button>
-    <button role="tab" data-view="hires" aria-selected="false">Hires</button>
-    <button role="tab" data-view="money" aria-selected="false">Money</button>
-    <button role="tab" data-view="settings" aria-selected="false" id="tab-settings">Settings</button>
-    <button role="tab" data-view="cars" aria-selected="false">Cars</button>
-    <button role="tab" data-view="customers" aria-selected="false">Customers</button>
-  </nav>
-</header>
+<div class="shell">
 
+<nav class="sidebar">
+  <div class="side-brand"><span class="brand-mark">R</span> Rentals</div>
+
+  <button class="btn solid side-cta" id="btn-add-car">+ Add a loan car</button>
+
+  <div class="side-group">
+    <button class="side-link" data-view="today" aria-current="true">Today</button>
+    <button class="side-link" data-view="calendar">Calendar</button>
+    <button class="side-link" data-view="hires">Hires</button>
+    <button class="side-link" data-view="courtesy">Courtesy cars
+      <span class="side-count" id="side-courtesy"></span></button>
+    <button class="side-link" data-view="money">Money</button>
+  </div>
+
+  <div class="side-label">Fleet</div>
+  <div class="side-group">
+    <button class="side-link" data-view="cars">Cars</button>
+    <button class="side-link" data-view="customers">Customers</button>
+  </div>
+
+  <div class="side-foot">
+    <button class="side-link" data-view="settings" id="tab-settings">Settings</button>
+    <button class="side-link" id="btn-logout">Sign out</button>
+  </div>
+</nav>
+
+<div class="content">
 <main>
   <!-- The board: what can go out, and what is already with someone -->
   <section class="view active" id="view-today">
     <div class="view-head">
       <h2>Rentals</h2>
       <span class="sub" id="board-sub"></span>
-      <div class="spacer"></div>
-      <button class="btn solid" id="btn-add-car">+ Add a loan car</button>
     </div>
 
     <!-- Filled in only when something needed is not set up. Silent when
@@ -49,6 +59,10 @@
 
     <div class="tiles" id="today-tiles"></div>
 
+    <!-- What needs doing, before what merely exists. -->
+    <div class="jobs" id="today-jobs"></div>
+
+    <div class="section-title">The forecourt</div>
     <div class="board">
       <div>
         <div class="section-title">Free to lend <span class="count-plain" id="free-count">0</span></div>
@@ -80,6 +94,112 @@
         <th>Car</th><th class="num">Hires</th><th class="num">Days out</th><th class="num">Billed</th>
       </tr></thead><tbody id="car-earnings"></tbody></table>
     </div></div>
+  </section>
+
+  <!-- Calendar: one row per car, days across, a bar per hire -->
+  <section class="view" id="view-calendar">
+    <div class="view-head"><h2>Calendar</h2>
+      <span class="sub" id="cal-sub"></span></div>
+
+    <div class="cal-toolbar">
+      <div class="chips" id="cal-periods">
+        <button class="chip" data-period="week" aria-pressed="true">This week</button>
+        <button class="chip" data-period="next-week" aria-pressed="false">Next week</button>
+        <button class="chip" data-period="month" aria-pressed="false">This month</button>
+        <button class="chip" data-period="next-month" aria-pressed="false">Next month</button>
+        <button class="chip" data-period="custom" aria-pressed="false">Custom</button>
+      </div>
+      <div class="cal-nav">
+        <button class="btn sm" id="cal-prev">←</button>
+        <button class="btn sm" id="cal-today">Today</button>
+        <button class="btn sm" id="cal-next">→</button>
+      </div>
+    </div>
+    <div class="cal-custom" id="cal-custom" hidden>
+      <div class="field"><label for="cal-from">From</label><input type="date" id="cal-from"></div>
+      <div class="field"><label for="cal-to">To</label><input type="date" id="cal-to"></div>
+      <button class="btn" id="cal-apply">Show</button>
+    </div>
+
+    <div class="panel cal-panel"><div class="cal-scroll" id="cal-grid"></div></div>
+    <div class="cal-key">
+      <span><i class="swatch is-out"></i> Out</span>
+      <span><i class="swatch is-booked"></i> Booked</span>
+      <span><i class="swatch is-late"></i> Overdue</span>
+      <span><i class="swatch is-done"></i> Returned</span>
+      <span class="car-sub">Click an empty day to lend that car out from it.</span>
+    </div>
+  </section>
+
+  <!-- One hire, in full -->
+  <section class="view" id="view-hire">
+    <button class="back-link" id="hire-back">← Back</button>
+    <div class="view-head">
+      <h2 id="hd-title">Hire</h2>
+      <div class="spacer"></div>
+      <span id="hd-status"></span>
+    </div>
+    <div class="hd-summary" id="hd-summary"></div>
+
+    <div class="hire-cols">
+      <div>
+        <div class="section-title">The bill</div>
+        <div class="panel form-panel">
+          <table class="bill" id="hd-bill"></table>
+          <div class="grid2" style="margin-top:14px">
+            <div class="field"><label for="hd-extra">Extra charges (£)</label>
+              <input type="number" id="hd-extra" min="0" step="0.01"></div>
+            <div class="field"><label for="hd-extra-note">What for</label>
+              <input type="text" id="hd-extra-note" placeholder="fuel, scuff on the wing" autocomplete="off"></div>
+          </div>
+          <div class="drawer-actions">
+            <button class="btn" id="hd-save-charges">Save charges</button>
+            <button class="btn" id="hd-late-fee">Apply late fee</button>
+            <button class="btn" id="hd-waive-late">Waive it</button>
+            <button class="btn" id="hd-deposit">Deposit returned</button>
+          </div>
+          <div class="drawer-actions">
+            <button class="btn solid" id="hd-pay">Take payment</button>
+            <button class="btn" id="hd-check-pay">Check if paid</button>
+          </div>
+          <div class="login-err" id="hd-money-err" role="alert"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="section-title">Messages</div>
+        <div class="panel form-panel">
+          <div class="field">
+            <textarea id="hd-message" rows="3" placeholder="Type a message to the customer…"></textarea>
+          </div>
+          <div class="drawer-actions">
+            <button class="btn solid" id="hd-send">Send text</button>
+            <button class="btn" id="hd-send-ready">Send "car is ready"</button>
+          </div>
+          <div class="login-err" id="hd-msg-err" role="alert"></div>
+          <div id="hd-messages" class="msg-log"></div>
+        </div>
+
+        <div class="section-title">Documents</div>
+        <div class="panel form-panel">
+          <div class="grid2">
+            <div class="field"><label for="hd-doc-kind">What is it?</label>
+              <select id="hd-doc-kind">
+                <option value="licence">Driving licence</option>
+                <option value="agreement">Signed agreement</option>
+                <option value="insurance">Insurance</option>
+                <option value="damage">Damage photo</option>
+                <option value="other">Other</option>
+              </select></div>
+            <div class="field"><label for="hd-doc-file">File</label>
+              <input type="file" id="hd-doc-file" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"></div>
+          </div>
+          <button class="btn" id="hd-doc-upload">Upload</button>
+          <span class="form-status" id="hd-doc-err"></span>
+          <div id="hd-docs" class="doc-list"></div>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- Settings: the price list and the two outside services, where they
@@ -238,6 +358,8 @@
     </div></div>
   </section>
 </main>
+</div>
+</div>
 
 <div class="scrim" id="scrim"></div>
 
@@ -395,72 +517,6 @@
     <button class="btn solid" id="cust-save">Save</button>
   </div>
 </div>
-
-<!-- One hire, everything about it -->
-<aside class="drawer" id="hire-drawer" aria-hidden="true">
-  <div class="drawer-head">
-    <h3 id="hd-title">Hire</h3>
-    <div class="spacer"></div>
-    <button class="btn sm" id="hd-close">Close</button>
-  </div>
-  <div class="drawer-body">
-    <div class="hd-summary" id="hd-summary"></div>
-
-    <div class="section-title">The bill</div>
-    <div class="panel form-panel">
-      <table class="bill" id="hd-bill"></table>
-      <div class="grid2" style="margin-top:14px">
-        <div class="field"><label for="hd-extra">Extra charges (£)</label>
-          <input type="number" id="hd-extra" min="0" step="0.01"></div>
-        <div class="field"><label for="hd-extra-note">What for</label>
-          <input type="text" id="hd-extra-note" placeholder="fuel, scuff on the wing" autocomplete="off"></div>
-      </div>
-      <div class="drawer-actions">
-        <button class="btn" id="hd-save-charges">Save charges</button>
-        <button class="btn" id="hd-late-fee">Apply late fee</button>
-        <button class="btn" id="hd-waive-late">Waive it</button>
-        <button class="btn" id="hd-deposit">Deposit returned</button>
-      </div>
-      <div class="drawer-actions" style="margin-top:10px">
-        <button class="btn solid" id="hd-pay">Take payment</button>
-        <button class="btn" id="hd-check-pay">Check if paid</button>
-      </div>
-      <div class="login-err" id="hd-money-err" role="alert"></div>
-    </div>
-
-    <div class="section-title">Send a message</div>
-    <div class="panel form-panel">
-      <div class="field">
-        <textarea id="hd-message" rows="3" placeholder="Type a message to the customer…"></textarea>
-      </div>
-      <div class="drawer-actions">
-        <button class="btn solid" id="hd-send">Send text</button>
-        <button class="btn" id="hd-send-ready">Use "car is ready"</button>
-      </div>
-      <div class="login-err" id="hd-msg-err" role="alert"></div>
-      <div id="hd-messages" class="msg-log"></div>
-    </div>
-
-    <div class="section-title">Documents</div>
-    <div class="panel form-panel">
-      <div class="grid2">
-        <div class="field"><label for="hd-doc-kind">What is it?</label>
-          <select id="hd-doc-kind">
-            <option value="licence">Driving licence</option>
-            <option value="agreement">Signed agreement</option>
-            <option value="insurance">Insurance</option>
-            <option value="damage">Damage photo</option>
-            <option value="other">Other</option>
-          </select></div>
-        <div class="field"><label for="hd-doc-file">File</label>
-          <input type="file" id="hd-doc-file" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic"></div>
-      </div>
-      <button class="btn" id="hd-doc-upload">Upload</button>
-      <span class="form-status" id="hd-doc-err"></span>
-      <div id="hd-docs" class="doc-list"></div>
-    </div>
-  </div>
-</aside>
 
 <div class="toasts" id="toasts"></div>
 

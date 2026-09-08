@@ -979,3 +979,138 @@ func TestDocumentsAttachToACustomerOrAHire(t *testing.T) {
 		t.Errorf("one document left for the customer, got %d", len(left))
 	}
 }
+
+// The morning's three questions: who is late, who is bringing one back,
+// and who is collecting one.
+func TestRentalTodayIsThreeListsOfWorkNotAnInventory(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	second, _ := db.AddRentalVehicle(RentalVehicle{Registration: "RE22NTL", DailyRate: 30})
+	third, _ := db.AddRentalVehicle(RentalVehicle{Registration: "RE23NTL", DailyRate: 30})
+	today := time.Now().Format("2006-01-02")
+	past := time.Now().AddDate(0, 0, -2).Format("2006-01-02")
+
+	// Late: out, ended two days ago.
+	late, err := db.CreateRentalAgreement(RentalAgreement{
+		VehicleID: vehicleID, CustomerID: customerID,
+		StartsOn: past, EndsOn: past, Status: RentalOut,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Due back today.
+	due, err := db.CreateRentalAgreement(RentalAgreement{
+		VehicleID: second, CustomerID: customerID,
+		StartsOn: past, EndsOn: today, Status: RentalOut,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Booked from today, not collected yet.
+	collect, err := db.CreateRentalAgreement(RentalAgreement{
+		VehicleID: third, CustomerID: customerID,
+		StartsOn: today, EndsOn: time.Now().AddDate(0, 0, 3).Format("2006-01-02"),
+		Status: RentalBooked,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	td, err := db.RentalToday()
+	if err != nil {
+		t.Fatalf("RentalToday: %v", err)
+	}
+	if len(td.Overdue) != 1 || td.Overdue[0].ID != late {
+		t.Errorf("Overdue = %+v, want just the late one", td.Overdue)
+	}
+	if len(td.DueToday) != 1 || td.DueToday[0].ID != due {
+		t.Errorf("DueToday = %+v, want just the one due back", td.DueToday)
+	}
+	if len(td.GoingOut) != 1 || td.GoingOut[0].ID != collect {
+		t.Errorf("GoingOut = %+v, want just the one being collected", td.GoingOut)
+	}
+	// A car due back today is not also late — the two lists must not
+	// double-count the same job.
+	if td.DueToday[0].DaysLate != 0 {
+		t.Errorf("a hire due back today is not late, got %d days", td.DueToday[0].DaysLate)
+	}
+}
+
+// The calendar is a planning grid: every live car is a row whether or not
+// it has a booking, and only hires touching the window are drawn.
+func TestRentalCalendarCoversTheWindowAndEveryLiveCar(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	if _, err := db.AddRentalVehicle(RentalVehicle{Registration: "RE22NTL"}); err != nil {
+		t.Fatal(err)
+	}
+	// A retired car is not part of any plan.
+	retired, _ := db.AddRentalVehicle(RentalVehicle{Registration: "RE23NTL"})
+	if err := db.UpdateRentalVehicle(retired, RentalVehicle{
+		Registration: "RE23NTL", Status: RentalRetired,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	inside, err := db.CreateRentalAgreement(RentalAgreement{
+		VehicleID: vehicleID, CustomerID: customerID,
+		StartsOn: "2026-09-10", EndsOn: "2026-09-14",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Straddles the start of the window — has to be drawn, clipped.
+	straddle, err := db.CreateRentalAgreement(RentalAgreement{
+		VehicleID: vehicleID, CustomerID: customerID,
+		StartsOn: "2026-09-01", EndsOn: "2026-09-08",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Entirely after it.
+	if _, err := db.CreateRentalAgreement(RentalAgreement{
+		VehicleID: vehicleID, CustomerID: customerID,
+		StartsOn: "2026-10-01", EndsOn: "2026-10-05",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cal, err := db.RentalCalendar("2026-09-07", "2026-09-13")
+	if err != nil {
+		t.Fatalf("RentalCalendar: %v", err)
+	}
+	if len(cal.Cars) != 2 {
+		t.Errorf("want the two live cars as rows, got %d", len(cal.Cars))
+	}
+	for _, c := range cal.Cars {
+		if c.Status == RentalRetired {
+			t.Error("a retired car should not be a row on a planning grid")
+		}
+	}
+	ids := map[int64]bool{}
+	for _, h := range cal.Hires {
+		ids[h.ID] = true
+	}
+	if !ids[inside] || !ids[straddle] {
+		t.Errorf("both the hire inside the window and the one straddling it should be drawn: %v", ids)
+	}
+	if len(cal.Hires) != 2 {
+		t.Errorf("the hire entirely outside the window should not be: %d hires", len(cal.Hires))
+	}
+
+	// A cancelled hire holds no car, so drawing it would imply otherwise.
+	if err := db.SetRentalAgreementStatus(inside, RentalCancelled, ""); err != nil {
+		t.Fatal(err)
+	}
+	cal, _ = db.RentalCalendar("2026-09-07", "2026-09-13")
+	if len(cal.Hires) != 1 {
+		t.Errorf("a cancelled hire should not appear on the calendar, got %d", len(cal.Hires))
+	}
+
+	if _, err := db.RentalCalendar("2026-09-13", "2026-09-07"); err == nil {
+		t.Error("a backwards window should be refused")
+	}
+	if _, err := db.RentalCalendar("", ""); err == nil {
+		t.Error("a calendar needs dates")
+	}
+}

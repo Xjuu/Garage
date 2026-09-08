@@ -39,6 +39,8 @@ func (s *Server) rentalsRoutes(sub fs.FS) http.Handler {
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/rentals/overview", s.json(s.rentalsOverview))
 	api.HandleFunc("GET /api/rentals/board", s.json(s.rentalBoard))
+	api.HandleFunc("GET /api/rentals/today", s.json(s.rentalToday))
+	api.HandleFunc("GET /api/rentals/calendar", s.json(s.rentalCalendar))
 	api.HandleFunc("POST /api/rentals/lend", s.json(s.lendCar))
 	api.HandleFunc("POST /api/rentals/agreements/{id}/back", s.json(s.bringCarBack))
 	api.HandleFunc("GET /api/rentals/stats", s.json(s.rentalStats))
@@ -97,6 +99,17 @@ func (s *Server) handleRentalsRoot(w http.ResponseWriter, r *http.Request) {
 func (s *Server) rentalsOverview(r *http.Request) (any, error) { return s.db.RentalOverview() }
 
 func (s *Server) rentalBoard(r *http.Request) (any, error) { return s.db.RentalBoard() }
+
+func (s *Server) rentalToday(r *http.Request) (any, error) { return s.db.RentalToday() }
+
+func (s *Server) rentalCalendar(r *http.Request) (any, error) {
+	v := r.URL.Query()
+	cal, err := s.db.RentalCalendar(v.Get("from"), v.Get("to"))
+	if err != nil {
+		return nil, fail(http.StatusBadRequest, "%v", err)
+	}
+	return cal, nil
+}
 
 // lendCar is the counter's one-click action: this car, this customer, back
 // on this date. Everything else on the form is optional detail that only

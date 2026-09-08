@@ -81,6 +81,7 @@ const state = {
   view: 'today',
   rates: {},     // the house price list, loaded once
   settings: null,
+  cal: { period: 'week', from: '', to: '' },
   hire: null,    // the agreement open in the drawer
   editingCar: null,
   editingCustomer: null,
@@ -97,18 +98,20 @@ const viewLoaders = {};
 
 function show(view) {
   state.view = view;
-  document.querySelectorAll('#tabs button').forEach((b) =>
-    b.setAttribute('aria-selected', String(b.dataset.view === view)));
+  document.querySelectorAll('.side-link[data-view]').forEach((b) =>
+    b.setAttribute('aria-current', String(b.dataset.view === view)));
   document.querySelectorAll('.view').forEach((s) =>
     s.classList.toggle('active', s.id === 'view-' + view));
+  // The hire page is reached from a row rather than the sidebar, so
+  // nothing in the sidebar is current while it is open.
   viewLoaders[view]?.().catch((e) => toast(e.message, true));
 }
 
-document.querySelectorAll('#tabs button').forEach((b) =>
+document.querySelectorAll('.side-link[data-view]').forEach((b) =>
   b.addEventListener('click', () => show(b.dataset.view)));
 
 // Changing keys is an admin act — the server enforces that, and hiding the
-// tab from everyone else stops it being a door that opens onto a 403.
+// link from everyone else stops it being a door that opens onto a 403.
 if (document.body.dataset.role && document.body.dataset.role !== 'admin') {
   $('tab-settings').hidden = true;
 }
@@ -162,6 +165,8 @@ async function loadToday() {
       ${t.m ? `<div class="m">${esc(t.m)}</div>` : ''}
     </div>`).join('');
 
+  renderJobs(await api('/api/rentals/today'));
+
   $('free-panel').innerHTML = board.free.length
     ? board.free.map((v) => `
         <div class="car-row">
@@ -200,6 +205,47 @@ async function loadToday() {
     b.addEventListener('click', () => openHire(b.dataset.openHire).catch((e) => toast(e.message, true))));
 
   renderSetupNote();
+}
+
+/** The three jobs a hire desk actually has each morning. Rendered as work
+    to do rather than a status list: each row is one action away from being
+    finished, and a group with nothing in it is left out entirely rather
+    than shown as a proud zero. */
+function renderJobs(t) {
+  const groups = [
+    { key: 'overdue', title: 'Overdue', tone: 'bad', rows: t.overdue,
+      action: (a) => `<button class="btn sm" data-back="${a.id}" data-label="${esc(a.registration)} · ${esc(a.customer_name)}">It's back</button>` },
+    { key: 'due', title: 'Due back today', tone: 'warn', rows: t.due_today,
+      action: (a) => `<button class="btn sm" data-back="${a.id}" data-label="${esc(a.registration)} · ${esc(a.customer_name)}">It's back</button>` },
+    { key: 'out', title: 'Going out', tone: 'good', rows: t.going_out,
+      action: (a) => `<button class="btn sm solid" data-pickup="${a.id}">Picked up</button>` },
+  ].filter((g) => g.rows && g.rows.length);
+
+  if (!groups.length) {
+    $('today-jobs').innerHTML =
+      '<div class="jobs-clear">Nothing needs chasing today.</div>';
+    return;
+  }
+
+  $('today-jobs').innerHTML = groups.map((g) => `
+    <div class="job-group is-${g.tone}">
+      <div class="job-head">${esc(g.title)}<span class="job-n">${g.rows.length}</span></div>
+      ${g.rows.map((a) => `
+        <div class="job-row">
+          <span class="reg">${esc(a.registration)}</span>
+          <div class="job-who">
+            <div class="car-name">${esc(a.customer_name)}</div>
+            <div class="car-sub">
+              ${g.key === 'overdue' ? `${a.days_late} day${a.days_late === 1 ? '' : 's'} late · due ${esc(ukDate(a.ends_on))}`
+                : g.key === 'due' ? `out since ${esc(ukDate(a.starts_on))}`
+                : `booked ${esc(ukDate(a.starts_on))} → ${esc(ukDate(a.ends_on))}`}
+              ${a.phone ? `· <span class="mono">${esc(a.phone)}</span>` : ''}
+            </div>
+          </div>
+          ${g.action(a)}
+          <button class="btn sm" data-open-hire="${a.id}">Open</button>
+        </div>`).join('')}
+    </div>`).join('');
 }
 
 /** Colour and what is on the clock — the two things that tell one otherwise
@@ -568,7 +614,7 @@ function closeModals() {
   });
 }
 
-$('scrim').addEventListener('click', () => { closeModals(); closeHire(); });
+$('scrim').addEventListener('click', closeModals);
 ['lend-close', 'lend-cancel', 'car-close', 'car-cancel', 'back-close', 'back-cancel',
   'cust-close', 'cust-cancel']
   .forEach((id) => $(id)?.addEventListener('click', closeModals));
@@ -596,17 +642,26 @@ $('l-courtesy-yn').addEventListener('change', () => {
 // ── lending a car out ─────────────────────────────────────────────────────
 
 async function openLend(vehicleID) {
-  const car = state.cars.find((c) => String(c.id) === String(vehicleID));
+  const car = (state.cars || []).find((c) => String(c.id) === String(vehicleID)) ||
+    (state.allCars || []).find((c) => String(c.id) === String(vehicleID));
   if (!car) return;
+  return openLendOn(car, todayISO());
+}
+
+/** The same form, opened for a particular car on a particular day — what
+    clicking an empty square on the calendar means. */
+async function openLendOn(car, startDay) {
   state.lending = car;
+  state.lendFrom = startDay || todayISO();
 
   $('lend-err').textContent = '';
   $('lend-car').innerHTML =
     `<span class="reg">${esc(car.registration)}</span>
      <span>${esc([car.make, car.model].filter(Boolean).join(' '))}</span>`;
   // A week is the ordinary loan, and the date is the one field somebody
-  // will change every time — so it starts somewhere sensible rather than empty.
-  $('l-back').value = addDays(todayISO(), 7);
+  // will change every time — so it starts somewhere sensible rather than
+  // empty. From the calendar it counts from the day that was clicked.
+  $('l-back').value = addDays(state.lendFrom || todayISO(), 7);
   $('l-mileage').value = car.mileage ? Math.round(car.mileage) : '';
   $('l-note').value = '';
   $('l-courtesy').value = '';
@@ -689,7 +744,8 @@ $('back-save').addEventListener('click', async () => {
     });
     toast('Back on the forecourt');
     closeModals();
-    show(state.view);
+    if (state.view === 'hire' && state.hire) openHire(state.hire.id).catch(() => show('today'));
+    else show(state.view);
   } catch (e) {
     $('back-err').textContent = e.message;
   }
@@ -804,7 +860,9 @@ $('cust-save').addEventListener('click', async () => {
 async function openHire(id) {
   const a = await api(`/api/rentals/agreements/${id}`);
   state.hire = a;
+  state.cameFrom = state.view === 'hire' ? state.cameFrom : state.view;
   $('hd-title').textContent = `${a.registration} · ${a.customer_name}`;
+  $('hd-status').innerHTML = statusPill(a);
   $('hd-money-err').textContent = '';
   $('hd-msg-err').textContent = '';
   $('hd-doc-err').textContent = '';
@@ -838,9 +896,15 @@ async function openHire(id) {
   $('hd-extra-note').value = a.extra_note || '';
   $('hd-message').value = '';
 
-  $('scrim').classList.add('open');
-  $('hire-drawer').classList.add('open');
-  $('hire-drawer').setAttribute('aria-hidden', 'false');
+  // A page rather than a drawer: the bill, the thread and the documents sit
+  // beside each other instead of stacked in a narrow column. Nothing in the
+  // sidebar is current while it is open, since it was reached from a row.
+  document.querySelectorAll('.view').forEach((v) =>
+    v.classList.toggle('active', v.id === 'view-hire'));
+  document.querySelectorAll('.side-link[data-view]').forEach((b) =>
+    b.setAttribute('aria-current', 'false'));
+  state.view = 'hire';
+  window.scrollTo(0, 0);
 
   loadHireMessages(a.customer_id);
   loadHireDocs(a);
@@ -876,12 +940,10 @@ function renderBill(a) {
 }
 
 function closeHire() {
-  $('scrim').classList.remove('open');
-  $('hire-drawer').classList.remove('open');
-  $('hire-drawer').setAttribute('aria-hidden', 'true');
   state.hire = null;
+  show(state.cameFrom || 'today');
 }
-$('hd-close').addEventListener('click', closeHire);
+$('hire-back').addEventListener('click', closeHire);
 
 /** Every action in the drawer refreshes it from what came back, so what is
     on screen is the server's answer rather than a guess at it. */
@@ -893,8 +955,8 @@ async function hireAction(fn, errBox = 'hd-money-err') {
     if (updated && updated.id) {
       state.hire = updated;
       renderBill(updated);
+      $('hd-status').innerHTML = statusPill(updated);
     }
-    show(state.view);
   } catch (e) {
     $(errBox).textContent = e.message;
   }
@@ -971,7 +1033,6 @@ $('hd-send-ready').addEventListener('click', async () => {
     await api(`/api/rentals/agreements/${state.hire.id}/text-ready`, { method: 'POST' });
     toast('Sent');
     loadHireMessages(state.hire.customer_id);
-    show(state.view);
   } catch (e) { $('hd-msg-err').textContent = e.message; }
 });
 
@@ -1034,6 +1095,197 @@ $('hd-doc-upload').addEventListener('click', async () => {
     $('hd-doc-err').textContent = e.message;
   }
   btn.disabled = false;
+});
+
+// ── calendar ──────────────────────────────────────────────────────────────
+
+/** Date arithmetic on plain ISO strings, never on Date objects with a time
+    in them: these are calendar days, and a timezone has no business
+    deciding which day a hire starts on. */
+function isoAdd(iso, days) {
+  const d = new Date(iso + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function isoDaysBetween(a, b) {
+  return Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 86400000);
+}
+
+/** Monday-first, because a hire desk's week does not start on Sunday. */
+function startOfWeek(iso) {
+  const d = new Date(iso + 'T12:00:00Z');
+  return isoAdd(iso, -((d.getUTCDay() + 6) % 7));
+}
+
+function startOfMonth(iso) { return iso.slice(0, 8) + '01'; }
+
+function endOfMonth(iso) {
+  const d = new Date(iso + 'T12:00:00Z');
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0, 12))
+    .toISOString().slice(0, 10);
+}
+
+/** Turns the chosen period into a window. Kept as one function so the
+    chips, the arrows and "Today" can never disagree about what "this
+    month" means. */
+function windowFor(period, anchor) {
+  switch (period) {
+    case 'week': return [startOfWeek(anchor), isoAdd(startOfWeek(anchor), 6)];
+    case 'next-week': return [startOfWeek(isoAdd(anchor, 7)), isoAdd(startOfWeek(isoAdd(anchor, 7)), 6)];
+    case 'month': return [startOfMonth(anchor), endOfMonth(anchor)];
+    case 'next-month': {
+      const nextish = isoAdd(endOfMonth(anchor), 1);
+      return [startOfMonth(nextish), endOfMonth(nextish)];
+    }
+    default: return [state.cal.from, state.cal.to];
+  }
+}
+
+/** How far an arrow moves: a week for the week views, a month for the
+    month ones, and the length of the window itself for a custom range. */
+function stepFor(period) {
+  if (period === 'week' || period === 'next-week') return 7;
+  if (period === 'month' || period === 'next-month') return 0; // handled by month maths
+  return isoDaysBetween(state.cal.from, state.cal.to) + 1;
+}
+
+async function loadCalendar() {
+  const c = state.cal;
+  if (!c.from || !c.to) {
+    const [from, to] = windowFor(c.period, todayISO());
+    c.from = from; c.to = to;
+  }
+
+  let cal;
+  try {
+    cal = await api(`/api/rentals/calendar?from=${c.from}&to=${c.to}`);
+  } catch (e) {
+    $('cal-grid').innerHTML = `<div class="empty-box">${esc(e.message)}</div>`;
+    return;
+  }
+
+  const days = [];
+  for (let d = cal.from; d <= cal.to; d = isoAdd(d, 1)) days.push(d);
+  $('cal-sub').textContent = `${ukDate(cal.from)} → ${ukDate(cal.to)} · ${cal.cars.length} car(s)`;
+
+  if (!cal.cars.length) {
+    $('cal-grid').innerHTML =
+      '<div class="empty-box"><strong>No cars yet</strong>Add a loan car and it will appear here.</div>';
+    return;
+  }
+
+  // One column per day, sized in the grid template so a bar can span days
+  // by column rather than by pixel arithmetic that drifts as it widens.
+  const cols = `grid-template-columns: var(--cal-label) repeat(${days.length}, minmax(34px, 1fr));`;
+  const today = todayISO();
+
+  let head = `<div class="cal-row cal-head" style="${cols}"><div class="cal-label"></div>` +
+    days.map((d) => {
+      const dt = new Date(d + 'T12:00:00Z');
+      const dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][(dt.getUTCDay() + 6) % 7];
+      const weekend = dt.getUTCDay() === 0 || dt.getUTCDay() === 6;
+      return `<div class="cal-day ${weekend ? 'is-weekend' : ''} ${d === today ? 'is-today' : ''}">
+        <span class="cal-dow">${dow}</span><span class="cal-dom">${Number(d.slice(8))}</span></div>`;
+    }).join('') + '</div>';
+
+  const byCar = {};
+  cal.hires.forEach((h) => { (byCar[h.vehicle_id] ??= []).push(h); });
+
+  const rows = cal.cars.map((car) => {
+    const cells = days.map((d) =>
+      `<div class="cal-cell ${d === today ? 'is-today' : ''}"
+            data-free-car="${car.id}" data-free-day="${d}"></div>`).join('');
+
+    // Each hire is one bar placed by grid column, clipped to the window.
+    const bars = (byCar[car.id] || []).map((h) => {
+      const from = h.starts_on < cal.from ? cal.from : h.starts_on;
+      const to = h.ends_on > cal.to ? cal.to : h.ends_on;
+      const start = isoDaysBetween(cal.from, from) + 2; // +1 for the label column, +1 for 1-based
+      const span = Math.max(1, isoDaysBetween(from, to) + 1);
+      const tone = h.status === 'returned' ? 'is-done'
+        : isOverdue(h) ? 'is-late'
+        : h.status === 'out' ? 'is-out' : 'is-booked';
+      return `<button class="cal-bar ${tone}" data-open-hire="${h.id}"
+        style="grid-column: ${start} / span ${span}"
+        title="${esc(h.customer_name)} · ${esc(ukDate(h.starts_on))} → ${esc(ukDate(h.ends_on))}">
+        <span>${esc(h.customer_name)}</span></button>`;
+    }).join('');
+
+    return `<div class="cal-row" style="${cols}">
+      <div class="cal-label">
+        <span class="reg">${esc(car.registration)}</span>
+        <span class="car-sub">${esc([car.make, car.model].filter(Boolean).join(' '))}</span>
+      </div>${cells}${bars}</div>`;
+  }).join('');
+
+  $('cal-grid').innerHTML = head + rows;
+
+  document.querySelectorAll('[data-open-hire]').forEach((b) =>
+    b.addEventListener('click', () => openHire(b.dataset.openHire).catch((e) => toast(e.message, true))));
+
+  // An empty day is an invitation: it opens the lend form for that car,
+  // starting on that day, which is the whole point of a planning grid.
+  document.querySelectorAll('[data-free-car]').forEach((cell) =>
+    cell.addEventListener('click', () => {
+      const car = cal.cars.find((c2) => String(c2.id) === cell.dataset.freeCar);
+      if (car) openLendOn(car, cell.dataset.freeDay);
+    }));
+}
+
+/** Switching period, as the chips do it. Its own function so the chips,
+    "Today" and anything else all move the window the same way. */
+function loadCalendarPeriod(period) {
+  state.cal.period = period;
+  document.querySelectorAll('#cal-periods .chip').forEach((o) =>
+    o.setAttribute('aria-pressed', String(o.dataset.period === period)));
+  $('cal-custom').hidden = period !== 'custom';
+  if (period === 'custom') {
+    $('cal-from').value = state.cal.from;
+    $('cal-to').value = state.cal.to;
+    return Promise.resolve();
+  }
+  const [from, to] = windowFor(period, todayISO());
+  state.cal.from = from;
+  state.cal.to = to;
+  return loadCalendar();
+}
+
+document.querySelectorAll('#cal-periods .chip').forEach((c) =>
+  c.addEventListener('click', () => {
+    loadCalendarPeriod(c.dataset.period).catch((e) => toast(e.message, true));
+  }));
+
+$('cal-apply').addEventListener('click', () => {
+  const from = $('cal-from').value;
+  const to = $('cal-to').value;
+  if (!from || !to) { toast('Pick both dates', true); return; }
+  state.cal.from = from; state.cal.to = to;
+  loadCalendar().catch((e) => toast(e.message, true));
+});
+
+/** The arrows move by whatever the current period is worth — a week for a
+    week, a month for a month, and its own length for a custom range. */
+function shiftCalendar(dir) {
+  const p = state.cal.period;
+  if (p === 'month' || p === 'next-month') {
+    const anchor = dir > 0 ? isoAdd(endOfMonth(state.cal.from), 1) : isoAdd(state.cal.from, -1);
+    state.cal.from = startOfMonth(anchor);
+    state.cal.to = endOfMonth(anchor);
+  } else {
+    const step = stepFor(p) * dir;
+    state.cal.from = isoAdd(state.cal.from, step);
+    state.cal.to = isoAdd(state.cal.to, step);
+  }
+  loadCalendar().catch((e) => toast(e.message, true));
+}
+
+$('cal-prev').addEventListener('click', () => shiftCalendar(-1));
+$('cal-next').addEventListener('click', () => shiftCalendar(1));
+$('cal-today').addEventListener('click', () => {
+  const [from, to] = windowFor(state.cal.period === 'custom' ? 'week' : state.cal.period, todayISO());
+  state.cal.from = from; state.cal.to = to;
+  loadCalendar().catch((e) => toast(e.message, true));
 });
 
 // ── settings ──────────────────────────────────────────────────────────────
@@ -1146,6 +1398,7 @@ async function loadRates() {
 
 Object.assign(viewLoaders, {
   today: loadToday,
+  calendar: loadCalendar,
   settings: loadSettings,
   courtesy: loadCourtesy,
   money: loadMoney,

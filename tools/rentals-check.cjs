@@ -61,11 +61,11 @@ const FREE = [
     mileage: 0, daily_rate: 0, status: 'available' },
 ];
 const OUT = [
-  { id: 1, customer_id: 7, customer_name: 'Alex Rider', phone: '+447700900123',
+  { id: 1, vehicle_id: 11, customer_id: 7, customer_name: 'Alex Rider', phone: '+447700900123',
     registration: 'RE21NTL', make: 'Toyota', model: 'Corolla',
     starts_on: '2026-09-01', ends_on: yesterday, status: 'out',
     courtesy_for_reg: 'AB12CDE', days: 4, total: 180 },
-  { id: 2, customer_id: 8, customer_name: 'Sam Vimes', phone: '',
+  { id: 2, vehicle_id: 12, customer_id: 8, customer_name: 'Sam Vimes', phone: '',
     registration: 'RE22NTL', make: 'Skoda', model: 'Octavia',
     starts_on: '2026-09-02', ends_on: '2099-01-01', status: 'out',
     courtesy_for_reg: '', days: 3, total: 120 },
@@ -103,6 +103,15 @@ let SETTINGS = {
   stripe_publishable_key: 'pk_1', stripe_return_url: 'https://r/',
 };
 
+// The three jobs the morning actually consists of.
+const TODAY = {
+  today: new Date().toISOString().slice(0, 10),
+  overdue: [OUT[0]],
+  due_today: [],
+  going_out: [],
+};
+
+const calendarWindows = [];
 const fetchCalls = [];
 let failNext = null;
 async function fakeFetch(url, opts = {}) {
@@ -120,6 +129,12 @@ async function fakeFetch(url, opts = {}) {
       available: 2, fleet: 4, customers: 3, out_value: 300 });
   }
   if (url === '/api/rentals/board') return json({ free: FREE, out: OUT });
+  if (url === '/api/rentals/today') return json(TODAY);
+  if (url.startsWith('/api/rentals/calendar')) {
+    const q = new URLSearchParams(url.split('?')[1] || '');
+    calendarWindows.push([q.get('from'), q.get('to')]);
+    return json({ from: q.get('from'), to: q.get('to'), cars: FREE, hires: OUT });
+  }
   if (url.startsWith('/api/rentals/customers')) {
     return json([{ id: 7, name: 'Alex Rider', phone: '+447700900123' }]);
   }
@@ -164,12 +179,10 @@ const ctx = vm.createContext({
   console,
   document: {
     getElementById: (id) => store[id] || null,
-    querySelectorAll: (sel) => {
-      // Only the board's own buttons are looked up this way; the harness
-      // drives them through the rendered markup instead.
-      if (sel === '#tabs button' || sel === '.view') return [];
-      return [];
-    },
+    // The harness drives buttons through the rendered markup rather than
+    // by selector, so these can all be empty — except that show() and
+    // openHire() walk them, and must not throw on an empty list.
+    querySelectorAll: () => [],
     createElement: () => makeEl('tmp'),
     addEventListener() {},
     body,
@@ -179,10 +192,13 @@ const ctx = vm.createContext({
   navigator: { clipboard: { writeText: async () => {} } },
   FormData: FakeFormData,
   open() {},
+  // openHire scrolls back to the top, the way a real navigation does.
+  // Absent, it threw and took the rest of the run down with it.
+  scrollTo() {},
   setTimeout, clearTimeout,
   fetch: fakeFetch,
   Math, JSON, Object, Array, Number, String, Boolean, Date, Set, Map, Promise,
-  Intl, encodeURIComponent,
+  Intl, encodeURIComponent, URLSearchParams,
 });
 ctx.window = ctx; ctx.globalThis = ctx;
 
@@ -410,12 +426,14 @@ function ok(cond, label) {
   ok(fetchCalls.some((c2) => c2.url === '/api/rentals/agreements/1/pay' &&
     c2.opts.method === 'POST'), 'taking payment opens a checkout for that hire');
 
-  // ── the hire drawer ──────────────────────────────────────────────────
+  // ── the hire page ────────────────────────────────────────────────────
   body.dataset.readonly = '';
   await ctx.openHire(1);
   await wait(10);
-  ok(store['hire-drawer'].classList.contains('open'), 'a hire opens in its own drawer');
-  ok(store['hd-title'].textContent === 'RE21NTL · Alex Rider', 'titled with the car and who has it');
+  ok(store['hd-title'].textContent === 'RE21NTL · Alex Rider',
+    'a hire opens as its own page, titled with the car and who has it');
+  ok(store['hd-status'].innerHTML.includes('Overdue'),
+    'with its status stated at the top: ' + store['hd-status'].innerHTML);
 
   const bill = store['hd-bill'].innerHTML;
   ok(bill.includes('225.00'), 'the bill shows the hire itself');
@@ -633,6 +651,71 @@ function ok(cond, label) {
   await wait(10);
   ok(fetchCalls.some((c2) => c2.url === '/api/rentals/settings/test-text'),
     'and with one, it sends');
+
+  // ── today is a jobs list, not an inventory ───────────────────────────
+  await ctx.loadToday();
+  await wait(10);
+  const jobs = store['today-jobs'].innerHTML;
+  ok(jobs.includes('Overdue') && jobs.includes('Alex Rider'),
+    'the day opens with what needs chasing');
+  ok(jobs.includes('is-bad'), 'an overdue group carries its tone');
+  ok(!jobs.includes('Due back today'),
+    'a group with nothing in it is left out rather than shown as a proud zero');
+  ok(jobs.includes('data-open-hire=') && jobs.includes("It's back"),
+    'and every job is one action from being finished');
+
+  // Nothing to chase says so, rather than rendering three empty boxes.
+  const realToday = { ...TODAY };
+  TODAY.overdue = []; TODAY.due_today = []; TODAY.going_out = [];
+  await ctx.loadToday();
+  await wait(10);
+  ok(/nothing needs chasing/i.test(store['today-jobs'].textContent || store['today-jobs'].innerHTML),
+    'a clear day says so: ' + store['today-jobs'].innerHTML.replace(/<[^>]*>/g, '').trim());
+  Object.assign(TODAY, realToday);
+
+  // ── the calendar ─────────────────────────────────────────────────────
+  calendarWindows.length = 0;
+  await ctx.loadCalendar();
+  await wait(10);
+  ok(calendarWindows.length === 1, 'the calendar asks the server for one window');
+  const [from, to] = calendarWindows[0];
+  ok(/^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to),
+    `for real dates: ${from} → ${to}`);
+  // A week is seven days inclusive, and starts on a Monday.
+  const span = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
+  ok(span === 7, `this week is seven days, got ${span}`);
+  ok(new Date(from + 'T12:00:00Z').getUTCDay() === 1,
+    'and starts on a Monday, which is when a working week starts');
+
+  const grid = store['cal-grid'].innerHTML;
+  ok(grid.includes('RE24NTL'), 'every live car is a row');
+  ok((grid.match(/data-free-car=/g) || []).length >= 14,
+    'with a clickable square per car per day');
+  ok(grid.includes('cal-bar'), 'and a bar for each hire');
+  ok(/is-late/.test(grid), 'an overdue hire is drawn as late rather than merely out');
+
+  // Moving a week forward moves the window, not the period.
+  calendarWindows.length = 0;
+  ctx.shiftCalendar(1);
+  await wait(10);
+  const [from2] = calendarWindows[0];
+  ok(Math.round((Date.parse(from2) - Date.parse(from)) / 86400000) === 7,
+    `the arrow moves a week: ${from} → ${from2}`);
+
+  // A month is a whole calendar month, not thirty days from today.
+  calendarWindows.length = 0;
+  ctx.state ? 0 : 0;
+  await ctx.loadCalendarPeriod('month');
+  await wait(10);
+  const [mFrom, mTo] = calendarWindows[calendarWindows.length - 1];
+  ok(mFrom.endsWith('-01'), `a month starts on the 1st, got ${mFrom}`);
+  ok(mFrom.slice(0, 7) === mTo.slice(0, 7), `and ends in the same month: ${mFrom} → ${mTo}`);
+
+  // Clicking an empty square offers that car from that day.
+  await ctx.openLendOn(FREE[0], '2026-12-01');
+  ok(store['lend-modal'].classList.contains('open'), 'an empty day opens the lend form');
+  ok(store['l-back'].value === '2026-12-08',
+    'with the return date a week from the day clicked, not from today: ' + store['l-back'].value);
 
   process.exit(failed ? 1 : 0);
 })();

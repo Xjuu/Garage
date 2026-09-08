@@ -1,3 +1,85 @@
+/* Rentals — a hire desk, not a document reader. Everything structural is
+   still inherited from app.css; this adds the shell it lives in, the
+   planning grid, and the one place this system allows itself colour.
+
+   Status colour is deliberate and narrow: green, amber and red appear ONLY
+   on status — a pill, a calendar bar, the edge of a job group. A desk is
+   scanned rather than read, and "overdue" is a thing you should catch
+   without stopping to read the word. Everything else stays monochrome. */
+
+:root {
+  --good: #0a7d32;
+  --good-bg: #eaf6ee;
+  --warn: #a35c00;
+  --warn-bg: #fdf3e5;
+  --bad: var(--flag);
+  --bad-bg: var(--flag-bg);
+
+  --side-w: 208px;
+  --cal-label: 150px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --good: #4ec26f;
+    --good-bg: #122017;
+    --warn: #e0a13c;
+    --warn-bg: #241c0e;
+  }
+}
+
+/* ── The shell ───────────────────────────────────────────────────────── */
+
+.shell { display: flex; min-height: 100vh; align-items: stretch; }
+
+.sidebar {
+  width: var(--side-w); flex: none;
+  border-right: 1px solid var(--g2); background: var(--paper);
+  padding: 18px 12px; display: flex; flex-direction: column; gap: 6px;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+}
+.side-brand {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 16px; font-weight: 800; letter-spacing: -0.03em;
+  padding: 0 8px 14px;
+}
+.side-cta { width: 100%; margin-bottom: 14px; }
+
+.side-group { display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px; }
+.side-label {
+  font-size: 10.5px; font-weight: 700; color: var(--g4);
+  text-transform: uppercase; letter-spacing: .07em; padding: 0 8px 6px;
+}
+.side-link {
+  display: flex; align-items: center; gap: 8px;
+  background: none; border: 0; cursor: pointer; text-align: left; width: 100%;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  font-size: 14px; font-weight: 600; color: var(--g5);
+}
+.side-link:hover { background: var(--g05); color: var(--ink); }
+.side-link[aria-current="true"] { background: var(--g1); color: var(--ink); }
+.side-count {
+  margin-left: auto; font-size: 11px; font-weight: 700;
+  background: var(--bad); color: #fff; border-radius: 100px; padding: 1px 7px;
+}
+.side-count:empty { display: none; }
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; }
+
+.content { flex: 1; min-width: 0; }
+.content main { max-width: 1280px; padding: 26px var(--pad) 60px; }
+
+@media (max-width: 860px) {
+  .shell { flex-direction: column; }
+  .sidebar {
+    width: auto; height: auto; position: static;
+    border-right: 0; border-bottom: 1px solid var(--g2);
+    flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px;
+  }
+  .side-brand, .side-label { padding: 0 8px; }
+  .side-cta { width: auto; margin: 0 0 0 auto; }
+  .side-group, .side-foot { flex-direction: row; margin: 0; }
+}
+
 /* Rentals — only what app.css doesn't already provide. Everything
    structural (tiles, panels, tables, chips, drawer, toasts, buttons) is
    deliberately inherited from the dashboard's own stylesheet so the two
@@ -219,3 +301,143 @@ table.bill tr.bill-total td {
   padding-top: 4px; margin-bottom: 30px;
 }
 .note a { font-weight: 700; }
+
+/* ── Today's jobs ────────────────────────────────────────────────────────
+   Work, not status. Each group carries its tone on one edge, which is
+   enough to tell them apart while scrolling past. */
+.jobs { display: flex; flex-direction: column; gap: 14px; margin-bottom: 30px; }
+.job-group {
+  border: 1px solid var(--g2); border-left: 3px solid var(--g3);
+  border-radius: var(--radius); overflow: hidden;
+}
+.job-group.is-bad { border-left-color: var(--bad); }
+.job-group.is-warn { border-left-color: var(--warn); }
+.job-group.is-good { border-left-color: var(--good); }
+
+.job-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-bottom: 1px solid var(--g1);
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+}
+.is-bad .job-head { color: var(--bad); }
+.is-warn .job-head { color: var(--warn); }
+.is-good .job-head { color: var(--good); }
+.job-n {
+  background: var(--g1); color: var(--g5); border-radius: 100px;
+  padding: 1px 8px; font-size: 11px; letter-spacing: 0;
+}
+
+.job-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 14px; border-bottom: 1px solid var(--g1);
+}
+.job-row:last-child { border-bottom: 0; }
+.job-who { flex: 1; min-width: 0; }
+.job-row .btn, .job-row .reg { flex-shrink: 0; }
+
+.jobs-clear {
+  padding: 22px; text-align: center; color: var(--g4); font-size: 13px;
+  border: 1px dashed var(--g2); border-radius: var(--radius); margin-bottom: 30px;
+}
+
+/* ── Status colour ───────────────────────────────────────────────────── */
+.pill.is-good { color: var(--good); border-color: var(--good); background: var(--good-bg); }
+.pill.is-warn { color: var(--warn); border-color: var(--warn); background: var(--warn-bg); }
+.pill.is-bad  { color: var(--bad);  border-color: var(--bad);  background: var(--bad-bg); }
+
+/* ── Calendar ────────────────────────────────────────────────────────────
+   One row per car, one column per day. Bars are placed by grid column
+   rather than by pixel maths, so a hire spanning five days still spans
+   exactly five columns at any width. */
+.cal-panel { padding: 0; overflow: hidden; }
+.cal-scroll { overflow-x: auto; }
+
+.cal-row {
+  display: grid; align-items: center;
+  border-bottom: 1px solid var(--g1); min-width: 700px;
+  position: relative;
+}
+.cal-row:last-child { border-bottom: 0; }
+
+.cal-head { background: var(--g05); position: sticky; top: 0; z-index: 2; }
+.cal-day {
+  padding: 7px 2px; text-align: center; font-size: 11px; color: var(--g4);
+  border-left: 1px solid var(--g1);
+}
+.cal-day.is-weekend { background: var(--g05); }
+.cal-day.is-today { background: var(--ink); color: var(--paper); }
+.cal-dow { display: block; font-weight: 700; }
+.cal-dom { display: block; font-size: 13px; color: inherit; }
+
+.cal-label {
+  padding: 9px 12px; min-width: 0;
+  border-right: 1px solid var(--g2); background: var(--paper);
+  position: sticky; left: 0; z-index: 1;
+}
+.cal-label .car-sub { margin-top: 2px; }
+
+.cal-cell {
+  height: 46px; border-left: 1px solid var(--g1); cursor: pointer;
+}
+.cal-cell:hover { background: var(--g05); }
+.cal-cell.is-today { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+
+/* Bars sit in the same grid track as the cells, one row up the stack. */
+.cal-bar {
+  grid-row: 1; align-self: center; z-index: 1;
+  margin: 0 2px; height: 30px; border: 0; border-radius: var(--radius-sm);
+  cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  padding: 0 9px; font-size: 12px; font-weight: 700; text-align: left;
+  color: #fff;
+}
+.cal-bar.is-out { background: var(--good); }
+.cal-bar.is-booked { background: var(--g5); }
+.cal-bar.is-late { background: var(--bad); }
+.cal-bar.is-done { background: var(--g3); color: var(--g6); }
+.cal-bar:hover { opacity: .88; }
+
+/* Label, cells and bars all occupy the same grid row, so a bar overlays
+   the days it covers rather than pushing them aside. */
+.cal-row > .cal-label, .cal-row > .cal-cell { grid-row: 1; }
+
+.cal-key {
+  display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+  margin-top: 12px; font-size: 12px; color: var(--g5);
+}
+.cal-key .swatch {
+  display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+  margin-right: 5px; vertical-align: -1px;
+}
+.swatch.is-out { background: var(--good); }
+.swatch.is-booked { background: var(--g5); }
+.swatch.is-late { background: var(--bad); }
+.swatch.is-done { background: var(--g3); }
+
+/* The period chips and the arrows share one line above the grid. */
+.cal-toolbar {
+  display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.cal-nav { display: flex; gap: 6px; margin-left: auto; }
+.cal-custom {
+  display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.cal-custom .field { margin: 0; }
+
+/* ── The hire page ───────────────────────────────────────────────────── */
+
+.back-link {
+  background: none; border: 0; cursor: pointer; padding: 0 0 10px;
+  font-size: 13px; font-weight: 600; color: var(--g5);
+}
+.back-link:hover { color: var(--ink); }
+
+/* Bill on the left, the conversation and its paperwork on the right —
+   the two things someone is doing at once when a car comes back. */
+.hire-cols {
+  display: grid; gap: 22px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+}
+@media (max-width: 1000px) { .hire-cols { grid-template-columns: 1fr; } }
