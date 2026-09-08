@@ -295,6 +295,12 @@ func (c *Config) RequireGemini() error {
 }
 
 func (c *Config) DBPath() string         { return filepath.Join(c.DataDir, "goldstar.db") }
+
+// RentalDocsDir holds licence scans, signed agreements and damage photos.
+// Its own folder rather than mixed in with attachments: those are supplier
+// invoices the extractor owns, these are customer documents with a
+// different retention story and a different reason to ever be deleted.
+func (c *Config) RentalDocsDir() string { return filepath.Join(c.DataDir, "rental-docs") }
 func (c *Config) AttachmentsDir() string { return filepath.Join(c.DataDir, "attachments") }
 
 // BackupsDir holds automatic nightly snapshots of the database.
@@ -307,7 +313,8 @@ func (c *Config) ExportsDir() string { return filepath.Join(c.DataDir, "exports"
 func (c *Config) ExamplesDir() string { return filepath.Join(c.DataDir, "examples") }
 
 func (c *Config) EnsureDirs() error {
-	for _, d := range []string{c.DataDir, c.AttachmentsDir(), c.ExportsDir(), c.ExamplesDir(), c.BackupsDir()} {
+	for _, d := range []string{c.DataDir, c.AttachmentsDir(), c.ExportsDir(),
+		c.ExamplesDir(), c.BackupsDir(), c.RentalDocsDir()} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
 		}

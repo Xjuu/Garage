@@ -79,6 +79,10 @@ function toast(msg, bad = false) {
 
 const state = {
   view: 'today',
+  rates: {},     // the house price list, loaded once
+  hire: null,    // the agreement open in the drawer
+  editingCar: null,
+  editingCustomer: null,
   hireStatus: '',
   customers: [],
   cars: [],      // what is free to lend right now, as the board last saw it
@@ -176,6 +180,7 @@ async function loadToday() {
               ${a.courtesy_for_reg ? `<span class="pill">Courtesy for ${esc(a.courtesy_for_reg)}</span>` : ''}
             </div>
           </div>
+          <button class="btn sm" data-open-hire="${a.id}">Open</button>
           <button class="btn sm" data-back="${a.id}" data-label="${esc(a.registration)} · ${esc(a.customer_name)}">It's back</button>
         </div>`).join('')
     : '<div class="empty-box">Every loan car is back on the forecourt.</div>';
@@ -184,6 +189,8 @@ async function loadToday() {
     b.addEventListener('click', () => openLend(b.dataset.lend)));
   document.querySelectorAll('[data-back]').forEach((b) =>
     b.addEventListener('click', () => openBack(b.dataset.back, b.dataset.label)));
+  document.querySelectorAll('[data-open-hire]').forEach((b) =>
+    b.addEventListener('click', () => openHire(b.dataset.openHire).catch((e) => toast(e.message, true))));
 }
 
 /** Colour and what is on the clock — the two things that tell one otherwise
@@ -212,7 +219,8 @@ async function loadHires() {
           <td>${statusPill(a)}</td>
           <td class="num">${a.days}</td>
           <td class="num strong">£${money(a.total)}</td>
-          <td class="num">${hireActions(a)}</td>
+          <td class="num">${hireActions(a)}
+            <button class="btn sm" data-open-hire="${a.id}">Open</button></td>
         </tr>`).join('')
     : '<tr><td colspan="8" class="empty">No hires match</td></tr>';
   wireAgreementButtons();
@@ -236,6 +244,8 @@ function wireAgreementButtons() {
     b.addEventListener('click', () => textCarReady(b.dataset.text)));
   document.querySelectorAll('[data-pay]').forEach((b) =>
     b.addEventListener('click', () => takePayment(b.dataset.pay)));
+  document.querySelectorAll('[data-open-hire]').forEach((b) =>
+    b.addEventListener('click', () => openHire(b.dataset.openHire).catch((e) => toast(e.message, true))));
 }
 
 /** Tell a customer their own car is repaired. The message is composed
@@ -357,6 +367,7 @@ async function loadMoney() {
 
 async function loadCars() {
   state.cars = await api('/api/rentals/vehicles');
+  state.allCars = state.cars;
   $('car-rows').innerHTML = state.cars.length
     ? state.cars.map((v) => `
         <tr class="${v.status === 'retired' ? 'row-muted' : ''}">
@@ -370,7 +381,9 @@ async function loadCars() {
               <option value="retired"${v.status === 'retired' ? ' selected' : ''}>Retired</option>
             </select>
           </td>
-          <td class="num"><button class="btn sm danger" data-del-car="${v.id}">Delete</button></td>
+          <td class="num">
+            <button class="btn sm" data-edit-car="${v.id}">Edit</button>
+            <button class="btn sm danger" data-del-car="${v.id}">Delete</button></td>
         </tr>`).join('')
     : '<tr><td colspan="5" class="empty"><strong>No hire cars yet</strong>Add one above to start booking.</td></tr>';
 
@@ -386,6 +399,10 @@ async function loadCars() {
         loadCars();
       } catch (e) { toast(e.message, true); loadCars(); }
     }));
+
+  document.querySelectorAll('[data-edit-car]').forEach((b) =>
+    b.addEventListener('click', () => openCarModal(
+      state.cars.find((c) => String(c.id) === b.dataset.editCar))));
 
   document.querySelectorAll('[data-del-car]').forEach((b) =>
     b.addEventListener('click', async () => {
@@ -438,9 +455,30 @@ async function loadCustomers() {
           <td>${esc(c.email) || '<span class="muted">—</span>'}</td>
           <td class="mono">${esc(c.licence_no) || '<span class="muted">—</span>'}</td>
           <td class="num">${counts[c.id] || 0}</td>
-          <td class="num"><button class="btn sm danger" data-del-cu="${c.id}">Delete</button></td>
+          <td class="num">
+            <button class="btn sm" data-msg-cu="${c.id}">Message</button>
+            <button class="btn sm" data-edit-cu="${c.id}">Edit</button>
+            <button class="btn sm danger" data-del-cu="${c.id}">Delete</button></td>
         </tr>`).join('')
     : '<tr><td colspan="6" class="empty">No customers yet</td></tr>';
+
+  document.querySelectorAll('[data-edit-cu]').forEach((b) =>
+    b.addEventListener('click', () => openCustomerModal(
+      state.customers.find((c) => String(c.id) === b.dataset.editCu))));
+
+  // Texting a customer with no hire open — chasing a returned car, say.
+  document.querySelectorAll('[data-msg-cu]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const c = state.customers.find((x) => String(x.id) === b.dataset.msgCu);
+      const body = prompt(`Text ${c.name}${c.phone ? ' (' + c.phone + ')' : ''}:`);
+      if (!body || !body.trim()) return;
+      try {
+        const res = await api('/api/rentals/messages', {
+          method: 'POST', json: { customer_id: c.id, body },
+        });
+        toast(`Texted ${res.sent_to}`);
+      } catch (e) { toast(e.message, true); }
+    }));
 
   document.querySelectorAll('[data-del-cu]').forEach((b) =>
     b.addEventListener('click', async () => {
@@ -458,7 +496,9 @@ $('cu-filter').addEventListener('input', () => {
   filterTimer = setTimeout(() => loadCustomers().catch((e) => toast(e.message, true)), 160);
 });
 
-$('ncu-add').addEventListener('click', async () => {
+$('btn-add-customer')?.addEventListener('click', () => openCustomerModal(null));
+
+$('ncu-add')?.addEventListener('click', async () => {
   const body = {
     name: $('ncu-name').value,
     phone: $('ncu-phone').value,
@@ -488,15 +528,16 @@ function openModal(id) {
 
 function closeModals() {
   $('scrim').classList.remove('open');
-  ['lend-modal', 'car-modal', 'back-modal'].forEach((id) => {
+  ['lend-modal', 'car-modal', 'back-modal', 'cust-modal'].forEach((id) => {
     $(id).classList.remove('open');
     $(id).setAttribute('aria-hidden', 'true');
   });
 }
 
-$('scrim').addEventListener('click', closeModals);
-['lend-close', 'lend-cancel', 'car-close', 'car-cancel', 'back-close', 'back-cancel']
-  .forEach((id) => $(id).addEventListener('click', closeModals));
+$('scrim').addEventListener('click', () => { closeModals(); closeHire(); });
+['lend-close', 'lend-cancel', 'car-close', 'car-cancel', 'back-close', 'back-cancel',
+  'cust-close', 'cust-cancel']
+  .forEach((id) => $(id)?.addEventListener('click', closeModals));
 
 /** The "+ more" expanders. Both modals open with only the fields that are
     actually required on screen; everything else is one click away, which is
@@ -537,6 +578,11 @@ async function openLend(vehicleID) {
   $('l-courtesy').value = '';
   $('l-courtesy-yn').value = 'no';
   $('l-courtesy-wrap').hidden = true;
+  // The house price list, so the counter agrees to the normal rates
+  // without retyping them — and can still override for this one hire.
+  $('l-insurance').value = state.rates.insurance || '';
+  $('l-latefee').value = state.rates.lateFee || '';
+  $('l-deposit').value = state.rates.deposit || '';
 
   openModal('lend-modal');
   await loadHireCustomers('l-customer');
@@ -575,6 +621,9 @@ $('lend-save').addEventListener('click', async () => {
         mileage_now: Number($('l-mileage').value) || 0,
         courtesy_for_reg: $('l-courtesy-yn').value === 'yes' ? $('l-courtesy').value : '',
         note: $('l-note').value,
+        insurance_per_day: Number($('l-insurance').value) || 0,
+        late_fee_per_day: Number($('l-latefee').value) || 0,
+        deposit: Number($('l-deposit').value) || 0,
       },
     });
     toast(`${state.lending.registration} is out`);
@@ -614,21 +663,50 @@ $('back-save').addEventListener('click', async () => {
 
 // ── adding one of our cars ────────────────────────────────────────────────
 
-$('btn-add-car').addEventListener('click', () => {
+/** One form for both adding and editing — the fields are identical, and two
+    near-copies of it is how they drift apart. A car being edited also gets
+    a Delete, which only makes sense once there is something to delete. */
+function openCarModal(car) {
+  state.editingCar = car || null;
   $('car-err').textContent = '';
-  ['c-reg', 'c-make', 'c-model', 'c-year', 'c-colour', 'c-mileage', 'c-mot', 'c-rate', 'c-notes']
-    .forEach((id) => { $(id).value = ''; });
-  $('c-status').value = 'available';
+  $('car-modal-title').textContent = car ? 'Edit this car' : 'Add one of our cars';
+  $('car-delete').hidden = !car;
+  $('c-reg').value = car ? car.registration : '';
+  $('c-make').value = car ? car.make : '';
+  $('c-model').value = car ? car.model : '';
+  $('c-status').value = car ? car.status : 'available';
+  $('c-year').value = car ? car.year : '';
+  $('c-colour').value = car ? car.colour : '';
+  $('c-mileage').value = car && car.mileage ? Math.round(car.mileage) : '';
+  $('c-mot').value = car ? (car.mot_expires || '') : '';
+  $('c-rate').value = car && car.daily_rate ? car.daily_rate : '';
+  $('c-notes').value = car ? car.notes : '';
+  // An existing car's details are worth seeing without a click.
+  if (car) { $('car-extra').hidden = false; $('car-more').textContent = '− Fewer details'; }
   openModal('car-modal');
+}
+
+$('btn-add-car').addEventListener('click', () => openCarModal(null));
+
+$('car-delete').addEventListener('click', async () => {
+  if (!state.editingCar) return;
+  $('car-err').textContent = '';
+  try {
+    await api(`/api/rentals/vehicles/${state.editingCar.id}`, { method: 'DELETE' });
+    toast('Car removed from the pool');
+    closeModals();
+    show(state.view);
+  } catch (e) { $('car-err').textContent = e.message; }
 });
 
 $('car-save').addEventListener('click', async () => {
   $('car-err').textContent = '';
   const btn = $('car-save');
   btn.disabled = true;
+  const editing = state.editingCar;
   try {
-    await api('/api/rentals/vehicles', {
-      method: 'POST',
+    await api(editing ? `/api/rentals/vehicles/${editing.id}` : '/api/rentals/vehicles', {
+      method: editing ? 'PATCH' : 'POST',
       json: {
         registration: $('c-reg').value,
         make: $('c-make').value,
@@ -642,11 +720,271 @@ $('car-save').addEventListener('click', async () => {
         notes: $('c-notes').value,
       },
     });
-    toast('Added to the loan fleet');
+    toast(editing ? 'Car updated' : 'Added to the loan fleet');
     closeModals();
     show(state.view);
   } catch (e) {
     $('car-err').textContent = e.message;
+  }
+  btn.disabled = false;
+});
+
+// ── customers: add and edit through one form ──────────────────────────────
+
+function openCustomerModal(c) {
+  state.editingCustomer = c || null;
+  $('cust-err').textContent = '';
+  $('cust-modal-title').textContent = c ? 'Edit customer' : 'Add a customer';
+  $('cu-name').value = c ? c.name : '';
+  $('cu-phone').value = c ? c.phone : '';
+  $('cu-email').value = c ? c.email : '';
+  $('cu-licence').value = c ? c.licence_no : '';
+  $('cu-address').value = c ? c.address : '';
+  $('cu-notes').value = c ? c.notes : '';
+  openModal('cust-modal');
+}
+
+$('cust-save').addEventListener('click', async () => {
+  $('cust-err').textContent = '';
+  const editing = state.editingCustomer;
+  const body = {
+    name: $('cu-name').value,
+    phone: $('cu-phone').value,
+    email: $('cu-email').value,
+    licence_no: $('cu-licence').value,
+    address: $('cu-address').value,
+    notes: $('cu-notes').value,
+  };
+  try {
+    await api(editing ? `/api/rentals/customers/${editing.id}` : '/api/rentals/customers', {
+      method: editing ? 'PATCH' : 'POST', json: body,
+    });
+    toast(editing ? 'Customer updated' : 'Customer added');
+    closeModals();
+    show(state.view);
+  } catch (e) { $('cust-err').textContent = e.message; }
+});
+
+// ── one hire, in full ─────────────────────────────────────────────────────
+
+async function openHire(id) {
+  const a = await api(`/api/rentals/agreements/${id}`);
+  state.hire = a;
+  $('hd-title').textContent = `${a.registration} · ${a.customer_name}`;
+  $('hd-money-err').textContent = '';
+  $('hd-msg-err').textContent = '';
+  $('hd-doc-err').textContent = '';
+
+  $('hd-summary').innerHTML = `
+    <div class="hd-line"><span class="reg">${esc(a.registration)}</span>
+      <span>${esc([a.make, a.model].filter(Boolean).join(' '))}</span>
+      ${statusPill(a)}</div>
+    <div class="hd-line car-sub">
+      ${esc(a.customer_name)}${a.phone ? ' · ' + esc(a.phone) : ''} ·
+      ${esc(ukDate(a.starts_on))} → ${esc(ukDate(a.ends_on))} (${a.days} day${a.days === 1 ? '' : 's'})
+      ${a.courtesy_for_reg ? `· <span class="pill">Courtesy for ${esc(a.courtesy_for_reg)}</span>` : ''}
+    </div>
+    ${a.notes ? `<div class="hd-line car-sub">${esc(a.notes)}</div>` : ''}`;
+
+  renderBill(a);
+  $('hd-extra').value = a.extra_charges || '';
+  $('hd-extra-note').value = a.extra_note || '';
+  $('hd-message').value = '';
+
+  $('scrim').classList.add('open');
+  $('hire-drawer').classList.add('open');
+  $('hire-drawer').setAttribute('aria-hidden', 'false');
+
+  loadHireMessages(a.customer_id);
+  loadHireDocs(a);
+}
+
+/** The bill, line by line. Shown as arithmetic rather than one number
+    because every line is something a customer might question, and "£360"
+    on its own answers none of those questions. */
+function renderBill(a) {
+  const line = (label, amount, cls = '') =>
+    `<tr class="${cls}"><td>${label}</td><td class="num">£${money(amount)}</td></tr>`;
+
+  let rows = line(`Hire · ${a.days} day${a.days === 1 ? '' : 's'} at £${money(a.daily_rate)}`, a.total);
+  if (a.insurance > 0) {
+    rows += line(`Insurance · ${a.days} × £${money(a.insurance_per_day)}`, a.insurance);
+  }
+  if (a.late_fee > 0) {
+    rows += line(`Late fee · ${a.days_late} day${a.days_late === 1 ? '' : 's'}`, a.late_fee, 'bill-flag');
+  } else if (a.late_fee_due > 0) {
+    rows += `<tr class="bill-muted"><td>${a.days_late} day${a.days_late === 1 ? '' : 's'} late
+      · £${money(a.late_fee_due)} not charged</td><td class="num">—</td></tr>`;
+  }
+  if (a.extra_charges > 0) {
+    rows += line(`Extras${a.extra_note ? ' · ' + esc(a.extra_note) : ''}`, a.extra_charges);
+  }
+  rows += `<tr class="bill-total"><td>${a.paid ? 'Paid' : 'To pay'}</td>
+           <td class="num">£${money(a.chargeable)}</td></tr>`;
+  if (a.deposit > 0) {
+    rows += `<tr class="bill-muted"><td>Deposit held${a.deposit_returned ? ' · returned' : ''}</td>
+             <td class="num">£${money(a.deposit)}</td></tr>`;
+  }
+  $('hd-bill').innerHTML = rows;
+}
+
+function closeHire() {
+  $('scrim').classList.remove('open');
+  $('hire-drawer').classList.remove('open');
+  $('hire-drawer').setAttribute('aria-hidden', 'true');
+  state.hire = null;
+}
+$('hd-close').addEventListener('click', closeHire);
+
+/** Every action in the drawer refreshes it from what came back, so what is
+    on screen is the server's answer rather than a guess at it. */
+async function hireAction(fn, errBox = 'hd-money-err') {
+  if (!state.hire) return;
+  $(errBox).textContent = '';
+  try {
+    const updated = await fn(state.hire);
+    if (updated && updated.id) {
+      state.hire = updated;
+      renderBill(updated);
+    }
+    show(state.view);
+  } catch (e) {
+    $(errBox).textContent = e.message;
+  }
+}
+
+$('hd-save-charges').addEventListener('click', () => hireAction((a) =>
+  api(`/api/rentals/agreements/${a.id}/charges`, {
+    method: 'PATCH',
+    json: { extra_charges: Number($('hd-extra').value) || 0, extra_note: $('hd-extra-note').value },
+  })));
+
+$('hd-late-fee').addEventListener('click', () => hireAction((a) =>
+  api(`/api/rentals/agreements/${a.id}/late-fee`, { method: 'POST', json: {} })));
+
+$('hd-waive-late').addEventListener('click', () => hireAction((a) =>
+  api(`/api/rentals/agreements/${a.id}/late-fee`, { method: 'POST', json: { amount: 0 } })));
+
+$('hd-deposit').addEventListener('click', () => hireAction((a) =>
+  api(`/api/rentals/agreements/${a.id}/deposit`, {
+    method: 'POST', json: { returned: !a.deposit_returned },
+  })));
+
+$('hd-pay').addEventListener('click', () => { if (state.hire) takePayment(state.hire.id); });
+
+$('hd-check-pay').addEventListener('click', () => hireAction(async (a) => {
+  const res = await api(`/api/rentals/agreements/${a.id}/payment`);
+  toast(res.paid ? 'Paid' : `Not paid yet (${res.status || 'no payment started'})`);
+  return api(`/api/rentals/agreements/${a.id}`);
+}));
+
+// ── messages in the drawer ────────────────────────────────────────────────
+
+async function loadHireMessages(customerID) {
+  const msgs = await api(`/api/rentals/messages?customer=${customerID}&limit=20`);
+  $('hd-messages').innerHTML = msgs.length
+    ? msgs.map((m) => `
+        <div class="msg ${m.status === 'failed' ? 'msg-failed' : ''}">
+          <div class="msg-body">${esc(m.body)}</div>
+          <div class="msg-meta">
+            ${esc((m.created_at || '').slice(0, 16))} · ${esc(m.sent_by || 'system')}
+            ${m.status === 'failed' ? `· <span class="pill flag">failed: ${esc(m.error)}</span>` : ''}
+          </div>
+        </div>`).join('')
+    : '<div class="car-sub">Nothing sent to this customer yet.</div>';
+}
+
+$('hd-send').addEventListener('click', async () => {
+  if (!state.hire) return;
+  $('hd-msg-err').textContent = '';
+  const body = $('hd-message').value.trim();
+  if (!body) { $('hd-msg-err').textContent = 'Type something first.'; return; }
+  const btn = $('hd-send');
+  btn.disabled = true;
+  try {
+    const res = await api('/api/rentals/messages', {
+      method: 'POST',
+      json: { customer_id: state.hire.customer_id, agreement_id: state.hire.id, body },
+    });
+    $('hd-message').value = '';
+    toast(`Texted ${res.sent_to}`);
+    loadHireMessages(state.hire.customer_id);
+  } catch (e) {
+    $('hd-msg-err').textContent = e.message;
+    loadHireMessages(state.hire.customer_id); // a failure is logged too
+  }
+  btn.disabled = false;
+});
+
+// Prefills rather than sends: the wording is the server's, but somebody
+// should still read it before it goes.
+$('hd-send-ready').addEventListener('click', async () => {
+  if (!state.hire) return;
+  try {
+    await api(`/api/rentals/agreements/${state.hire.id}/text-ready`, { method: 'POST' });
+    toast('Sent');
+    loadHireMessages(state.hire.customer_id);
+    show(state.view);
+  } catch (e) { $('hd-msg-err').textContent = e.message; }
+});
+
+// ── documents in the drawer ───────────────────────────────────────────────
+
+async function loadHireDocs(a) {
+  const docs = await api(`/api/rentals/documents?customer=${a.customer_id}&agreement=${a.id}`);
+  $('hd-docs').innerHTML = docs.length
+    ? docs.map((d) => `
+        <div class="doc">
+          <a href="/api/rentals/documents/${d.id}/file" target="_blank" rel="noopener">${esc(d.filename)}</a>
+          <span class="pill">${esc(d.kind)}</span>
+          <span class="car-sub">${Math.round(d.bytes / 1024).toLocaleString('en-GB')} KB ·
+            ${esc((d.created_at || '').slice(0, 10))}${d.uploaded_by ? ' · ' + esc(d.uploaded_by) : ''}</span>
+          <button class="btn sm danger" data-del-doc="${d.id}">Delete</button>
+        </div>`).join('')
+    : '<div class="car-sub">No documents yet — licence, signed agreement, damage photos.</div>';
+
+  document.querySelectorAll('[data-del-doc]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      try {
+        await api(`/api/rentals/documents/${b.dataset.delDoc}`, { method: 'DELETE' });
+        toast('Document deleted');
+        loadHireDocs(a);
+      } catch (e) { toast(e.message, true); }
+    }));
+}
+
+$('hd-doc-upload').addEventListener('click', async () => {
+  if (!state.hire) return;
+  $('hd-doc-err').textContent = '';
+  const input = $('hd-doc-file');
+  const file = input.files && input.files[0];
+  if (!file) { $('hd-doc-err').textContent = 'Choose a file first.'; return; }
+  // The read-only guard lives in api(), which this bypasses for the
+  // multipart body — so it is repeated here rather than left to the 403.
+  if (document.body.dataset.readonly === 'true') {
+    $('hd-doc-err').textContent = 'This is a view-only account — changes are disabled.';
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('kind', $('hd-doc-kind').value);
+  fd.append('agreement_id', state.hire.id);
+  fd.append('customer_id', state.hire.customer_id);
+
+  const btn = $('hd-doc-upload');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/rentals/documents', {
+      method: 'POST', body: fd, headers: { 'X-CSRF-Token': readCookie('goldstar_csrf') },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'upload failed');
+    input.value = '';
+    toast('Uploaded');
+    loadHireDocs(state.hire);
+  } catch (e) {
+    $('hd-doc-err').textContent = e.message;
   }
   btn.disabled = false;
 });
@@ -658,6 +996,19 @@ $('btn-logout').addEventListener('click', async () => {
   location.href = '/';
 });
 
+/** The price list, read once so the lend form can offer the house rates
+    without a round trip every time somebody opens it. */
+async function loadRates() {
+  try {
+    const s2 = await api('/api/rentals/settings');
+    state.rates = {
+      insurance: s2.rental_insurance_per_day || '',
+      lateFee: s2.rental_late_fee_per_day || '',
+      deposit: s2.rental_deposit_default || '',
+    };
+  } catch { /* the form just opens with blanks */ }
+}
+
 Object.assign(viewLoaders, {
   today: loadToday,
   courtesy: loadCourtesy,
@@ -667,4 +1018,5 @@ Object.assign(viewLoaders, {
   customers: loadCustomers,
 });
 
+loadRates();
 show('today');

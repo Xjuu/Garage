@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"goldstar/internal/store"
@@ -39,6 +40,9 @@ func (s *Server) saveIntegrationSettings(r *http.Request) (any, error) {
 		StripeKey         *string `json:"stripe_secret_key"`
 		StripePublishable *string `json:"stripe_publishable_key"`
 		StripeReturnURL   *string `json:"stripe_return_url"`
+		InsurancePerDay   *string `json:"rental_insurance_per_day"`
+		LateFeePerDay     *string `json:"rental_late_fee_per_day"`
+		DepositDefault    *string `json:"rental_deposit_default"`
 		ClearTwilioToken  bool    `json:"clear_twilio_auth_token"`
 		ClearStripeKey    bool    `json:"clear_stripe_secret_key"`
 	}
@@ -67,6 +71,9 @@ func (s *Server) saveIntegrationSettings(r *http.Request) (any, error) {
 		{store.SetStripeKey, body.StripeKey},
 		{store.SetStripePublishable, body.StripePublishable},
 		{store.SetStripeReturnURL, body.StripeReturnURL},
+		{store.SetInsurancePerDay, body.InsurancePerDay},
+		{store.SetLateFeePerDay, body.LateFeePerDay},
+		{store.SetDepositDefault, body.DepositDefault},
 	} {
 		if err := set(p.key, p.val); err != nil {
 			return nil, err
@@ -124,8 +131,26 @@ func (s *Server) textCarReady(r *http.Request) (any, error) {
 			firstName(a.CustomerName), a.CourtesyForReg, a.Registration)
 	}
 
-	if _, err := twilio.New().Send(r.Context(), s.twilioCreds(), a.Phone, msg); err != nil {
-		return nil, fail(http.StatusBadGateway, "%v", err)
+	by := ""
+	if u, ok := s.auth.CurrentUser(r); ok {
+		by = u.Username
+	}
+	logged := store.RentalMessage{
+		CustomerID: a.CustomerID, AgreementID: &a.ID, Phone: a.Phone, Body: msg, SentBy: by,
+	}
+
+	sid, sendErr := twilio.New().Send(r.Context(), s.twilioCreds(), a.Phone, msg)
+	if sendErr != nil {
+		// Logged as a failure rather than dropped: "we tried and it
+		// bounced" is the record that matters when a customer says nobody
+		// told them.
+		logged.Status, logged.Error = "failed", sendErr.Error()
+		_, _ = s.db.LogRentalMessage(logged)
+		return nil, fail(http.StatusBadGateway, "%v", sendErr)
+	}
+	logged.Status, logged.ProviderSID = "sent", sid
+	if _, err := s.db.LogRentalMessage(logged); err != nil {
+		return nil, err
 	}
 	if err := s.db.MarkReadyTexted(id); err != nil {
 		return nil, err
@@ -166,10 +191,15 @@ func (s *Server) startRentalPayment(r *http.Request) (any, error) {
 	key, _ := s.db.Setting(store.SetStripeKey)
 	returnURL, _ := s.db.Setting(store.SetStripeReturnURL)
 	desc := fmt.Sprintf("%s hire — %s, %d day(s)", a.Registration, a.CustomerName, a.Days)
+	if a.Insurance > 0 || a.LateFee > 0 || a.ExtraCharges > 0 {
+		desc += " incl. extras"
+	}
 
-	// Pence, not pounds: Stripe deals in the smallest unit, and rounding
-	// here rather than at the boundary is how a penny goes missing.
-	pence := int64(a.Total*100 + 0.5)
+	// Chargeable, not Total: the customer owes the hire plus insurance,
+	// any late fee actually applied, and any extras. Pence, not pounds —
+	// Stripe deals in the smallest unit, and rounding here rather than at
+	// the boundary is how a penny goes missing.
+	pence := int64(a.Chargeable*100 + 0.5)
 	sess, err := stripe.New().CreateCheckout(r.Context(), key, desc, pence, returnURL,
 		map[string]string{"agreement_id": fmt.Sprint(a.ID), "registration": a.Registration})
 	if err != nil {
@@ -211,3 +241,18 @@ func (s *Server) checkRentalPayment(r *http.Request) (any, error) {
 
 func (s *Server) rentalStats(r *http.Request) (any, error)   { return s.db.RentalStats() }
 func (s *Server) courtesyLoans(r *http.Request) (any, error) { return s.db.CourtesyLoans() }
+
+// settingFloat reads a numeric setting, treating anything unparseable as
+// zero — the price list is typed into a text box by a person, and a stray
+// "£" should mean "no charge configured" rather than failing a hire.
+func (s *Server) settingFloat(key string) float64 {
+	v, err := s.db.Setting(key)
+	if err != nil {
+		return 0
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(v), "£")), 64)
+	if err != nil || f < 0 {
+		return 0
+	}
+	return f
+}

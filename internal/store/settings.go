@@ -14,6 +14,12 @@ const (
 	// back to once they have paid. Neither is a secret.
 	SetStripePublishable = "stripe_publishable_key"
 	SetStripeReturnURL   = "stripe_return_url"
+
+	// The house price list for hires. Snapshotted onto an agreement when a
+	// car goes out, so changing these never rewrites an existing hire.
+	SetInsurancePerDay = "rental_insurance_per_day"
+	SetLateFeePerDay   = "rental_late_fee_per_day"
+	SetDepositDefault  = "rental_deposit_default"
 )
 
 // secretSettings are the ones never sent back to a browser — only whether
@@ -55,6 +61,10 @@ type SettingsView struct {
 	StripeReturnURL   string `json:"stripe_return_url"`
 	StripeKeySet      bool   `json:"stripe_secret_key_set"`
 	StripeReady       bool   `json:"stripe_ready"`
+
+	InsurancePerDay string `json:"rental_insurance_per_day"`
+	LateFeePerDay   string `json:"rental_late_fee_per_day"`
+	DepositDefault  string `json:"rental_deposit_default"`
 }
 
 func (s *Store) SettingsView() (*SettingsView, error) {
@@ -82,6 +92,9 @@ func (s *Store) SettingsView() (*SettingsView, error) {
 		StripePublishable: all[SetStripePublishable],
 		StripeReturnURL:   all[SetStripeReturnURL],
 		StripeKeySet:      all[SetStripeKey] != "",
+		InsurancePerDay:   all[SetInsurancePerDay],
+		LateFeePerDay:     all[SetLateFeePerDay],
+		DepositDefault:    all[SetDepositDefault],
 	}
 	// "Ready" is the only thing the UI should act on: a half-filled set of
 	// credentials cannot send anything, and saying so up front beats a

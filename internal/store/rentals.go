@@ -282,22 +282,29 @@ func (s *Store) DeleteRentalVehicle(id int64) error {
 // RentalAgreement is one hire, as written. See RentalAgreementView for the
 // same row joined to the names a screen actually needs.
 type RentalAgreement struct {
-	ID             int64   `json:"id"`
-	VehicleID      int64   `json:"vehicle_id"`
-	CustomerID     int64   `json:"customer_id"`
-	StartsOn       string  `json:"starts_on"`
-	EndsOn         string  `json:"ends_on"`
-	ReturnedOn     string  `json:"returned_on"`
-	Status         string  `json:"status"`
-	DailyRate      float64 `json:"daily_rate"`
-	MileageOut     float64 `json:"mileage_out"`
-	CourtesyForReg string  `json:"courtesy_for_reg"`
-	Paid           bool    `json:"paid"`
-	PaymentSession string  `json:"payment_session"`
-	PaymentURL     string  `json:"payment_url"`
-	ReadyTextedAt  string  `json:"ready_texted_at"`
-	Notes          string  `json:"notes"`
-	CreatedAt      string  `json:"created_at"`
+	ID              int64   `json:"id"`
+	VehicleID       int64   `json:"vehicle_id"`
+	CustomerID      int64   `json:"customer_id"`
+	StartsOn        string  `json:"starts_on"`
+	EndsOn          string  `json:"ends_on"`
+	ReturnedOn      string  `json:"returned_on"`
+	Status          string  `json:"status"`
+	DailyRate       float64 `json:"daily_rate"`
+	MileageOut      float64 `json:"mileage_out"`
+	CourtesyForReg  string  `json:"courtesy_for_reg"`
+	InsurancePerDay float64 `json:"insurance_per_day"`
+	LateFeePerDay   float64 `json:"late_fee_per_day"`
+	LateFee         float64 `json:"late_fee"`
+	ExtraCharges    float64 `json:"extra_charges"`
+	ExtraNote       string  `json:"extra_note"`
+	Deposit         float64 `json:"deposit"`
+	DepositReturned bool    `json:"deposit_returned"`
+	Paid            bool    `json:"paid"`
+	PaymentSession  string  `json:"payment_session"`
+	PaymentURL      string  `json:"payment_url"`
+	ReadyTextedAt   string  `json:"ready_texted_at"`
+	Notes           string  `json:"notes"`
+	CreatedAt       string  `json:"created_at"`
 }
 
 // RentalAgreementView is what every list screen wants: the hire plus who
@@ -312,13 +319,26 @@ type RentalAgreementView struct {
 	// Days is the agreed length in whole days, inclusive of both ends —
 	// a car out Monday to Monday is one day's hire, not zero.
 	Days int `json:"days"`
-	// Total is Days × DailyRate, the figure a payment would be for.
+	// Total is Days × DailyRate — the hire itself, before anything else.
 	Total float64 `json:"total"`
+	// Insurance is Days × InsurancePerDay.
+	Insurance float64 `json:"insurance"`
+	// DaysLate is how far past the agreed end this went — against today
+	// while the car is still out, against the day it came back once it is.
+	DaysLate int `json:"days_late"`
+	// LateFeeDue is what that lateness comes to at the agreed rate; LateFee
+	// (stored) is what someone has actually decided to charge.
+	LateFeeDue float64 `json:"late_fee_due"`
+	// Chargeable is the one number that matters: hire, insurance, any late
+	// fee actually applied, and any extras.
+	Chargeable float64 `json:"chargeable"`
 }
 
 const rentalAgreementView = `
 	SELECT a.id, a.vehicle_id, a.customer_id, a.starts_on, a.ends_on, a.returned_on,
 	       a.status, a.daily_rate, a.mileage_out, a.courtesy_for_reg,
+	       a.insurance_per_day, a.late_fee_per_day, a.late_fee, a.extra_charges,
+	       a.extra_note, a.deposit, a.deposit_returned,
 	       a.paid, a.payment_session, a.payment_url, a.ready_texted_at, a.notes, a.created_at,
 	       c.name, c.phone, v.registration, v.make, v.model,
 	       CAST(julianday(a.ends_on) - julianday(a.starts_on) AS INTEGER) + 1
@@ -328,19 +348,54 @@ const rentalAgreementView = `
 
 func scanRentalAgreementView(scan func(...any) error) (*RentalAgreementView, error) {
 	var a RentalAgreementView
-	var paid int
+	var paid, depositReturned int
 	if err := scan(&a.ID, &a.VehicleID, &a.CustomerID, &a.StartsOn, &a.EndsOn, &a.ReturnedOn,
 		&a.Status, &a.DailyRate, &a.MileageOut, &a.CourtesyForReg,
+		&a.InsurancePerDay, &a.LateFeePerDay, &a.LateFee, &a.ExtraCharges,
+		&a.ExtraNote, &a.Deposit, &depositReturned,
 		&paid, &a.PaymentSession, &a.PaymentURL, &a.ReadyTextedAt, &a.Notes, &a.CreatedAt,
 		&a.CustomerName, &a.Phone, &a.Registration, &a.Make, &a.Model, &a.Days); err != nil {
 		return nil, err
 	}
 	a.Paid = paid != 0
+	a.DepositReturned = depositReturned != 0
 	if a.Days < 1 {
 		a.Days = 1
 	}
 	a.Total = float64(a.Days) * a.DailyRate
+	a.priceUp()
 	return &a, nil
+}
+
+// priceUp fills in everything derived from the stored figures: what the
+// insurance comes to, how late the car is, what that lateness would cost,
+// and the single number someone actually has to pay.
+//
+// Lateness is worked out here rather than in SQL because it has two
+// different clocks — a car still out is late against today, one already
+// back is late against the day it came back — and expressing that twice in
+// two dialects is how two screens come to disagree about a debt.
+func (a *RentalAgreementView) priceUp() {
+	a.Insurance = float64(a.Days) * a.InsurancePerDay
+
+	end, err := time.Parse("2006-01-02", a.EndsOn)
+	if err == nil && a.Status != RentalCancelled {
+		against := time.Now()
+		if a.ReturnedOn != "" {
+			if back, err := time.Parse("2006-01-02", a.ReturnedOn); err == nil {
+				against = back
+			}
+		}
+		if d := int(against.Sub(end).Hours() / 24); d > 0 {
+			a.DaysLate = d
+		}
+	}
+	// What lateness WOULD cost. Deliberately not the same field as LateFee:
+	// an overdue car should show what it is running up without that
+	// silently becoming a debt nobody has agreed to charge.
+	a.LateFeeDue = float64(a.DaysLate) * a.LateFeePerDay
+
+	a.Chargeable = a.Total + a.Insurance + a.LateFee + a.ExtraCharges
 }
 
 // isoDate is a cheap shape check. The dates arriving here come from a date
@@ -416,10 +471,12 @@ func (s *Store) CreateRentalAgreement(a RentalAgreement) (int64, error) {
 
 	res, err := tx.Exec(`INSERT INTO rental_agreements
 		(vehicle_id, customer_id, starts_on, ends_on, status, daily_rate,
-		 mileage_out, courtesy_for_reg, notes, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		 mileage_out, courtesy_for_reg, insurance_per_day, late_fee_per_day,
+		 deposit, notes, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
 		a.VehicleID, a.CustomerID, a.StartsOn, a.EndsOn, a.Status, a.DailyRate,
-		a.MileageOut, NormalizeReg(a.CourtesyForReg), a.Notes)
+		a.MileageOut, NormalizeReg(a.CourtesyForReg),
+		a.InsurancePerDay, a.LateFeePerDay, a.Deposit, a.Notes)
 	if err != nil {
 		return 0, err
 	}
@@ -599,8 +656,30 @@ func (s *Store) RentalOverview() (*RentalOverview, error) {
 //
 // courtesyForReg, when set, is the customer's OWN car sitting in the
 // workshop — what makes this a courtesy car rather than a plain hire.
-func (s *Store) LendCar(vehicleID, customerID int64, backOn string, mileageNow float64,
-	courtesyForReg, note string) (int64, error) {
+// LendRequest is everything agreed at the counter. A struct rather than
+// nine positional arguments: half of them are money, and a caller swapping
+// two floats by accident is not a mistake any compiler would catch.
+type LendRequest struct {
+	VehicleID      int64   `json:"vehicle_id"`
+	CustomerID     int64   `json:"customer_id"`
+	BackOn         string  `json:"back_on"`
+	MileageNow     float64 `json:"mileage_now"`
+	CourtesyForReg string  `json:"courtesy_for_reg"`
+	Note           string  `json:"note"`
+	// Rates agreed now and snapshotted onto the hire, so tomorrow's price
+	// list never rewrites today's agreement.
+	InsurancePerDay float64 `json:"insurance_per_day"`
+	LateFeePerDay   float64 `json:"late_fee_per_day"`
+	Deposit         float64 `json:"deposit"`
+}
+
+func (s *Store) LendCar(req LendRequest) (int64, error) {
+	vehicleID, customerID := req.VehicleID, req.CustomerID
+	backOn, mileageNow := req.BackOn, req.MileageNow
+	courtesyForReg, note := req.CourtesyForReg, req.Note
+	if req.InsurancePerDay < 0 || req.LateFeePerDay < 0 || req.Deposit < 0 {
+		return 0, fmt.Errorf("rates and deposits cannot be negative")
+	}
 	if !isoDate(backOn) {
 		return 0, fmt.Errorf("a date for bringing it back is required")
 	}
@@ -651,10 +730,12 @@ func (s *Store) LendCar(vehicleID, customerID int64, backOn string, mileageNow f
 
 	res, err := tx.Exec(`INSERT INTO rental_agreements
 		(vehicle_id, customer_id, starts_on, ends_on, status, daily_rate,
-		 mileage_out, courtesy_for_reg, notes, created_at)
-		VALUES (?, ?, ?, ?, 'out', ?, ?, ?, ?, datetime('now'))`,
+		 mileage_out, courtesy_for_reg, insurance_per_day, late_fee_per_day,
+		 deposit, notes, created_at)
+		VALUES (?, ?, ?, ?, 'out', ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
 		vehicleID, customerID, today, backOn, rate,
-		mileageNow, NormalizeReg(courtesyForReg), strings.TrimSpace(note))
+		mileageNow, NormalizeReg(courtesyForReg),
+		req.InsurancePerDay, req.LateFeePerDay, req.Deposit, strings.TrimSpace(note))
 	if err != nil {
 		return 0, err
 	}
@@ -887,4 +968,277 @@ func (s *Store) CourtesyLoans() ([]RentalAgreementView, error) {
 		out = append(out, *a)
 	}
 	return out, rows.Err()
+}
+
+// ── charges ───────────────────────────────────────────────────────────────
+
+// RentalCharges is what the desk can change about a hire's money after it
+// has started: the extras it picked up, and whether the deposit went back.
+// Rates (insurance, late fee per day) are deliberately absent — those were
+// agreed when the keys were handed over and re-pricing them afterwards is
+// not an edit, it is a different agreement.
+type RentalCharges struct {
+	ExtraCharges float64 `json:"extra_charges"`
+	ExtraNote    string  `json:"extra_note"`
+}
+
+func (s *Store) SetRentalCharges(agreementID int64, c RentalCharges) error {
+	if c.ExtraCharges < 0 {
+		return fmt.Errorf("an extra charge cannot be negative — take the deposit back instead")
+	}
+	_, err := s.db.Exec(`UPDATE rental_agreements
+		SET extra_charges = ?, extra_note = ? WHERE id = ?`,
+		c.ExtraCharges, strings.TrimSpace(c.ExtraNote), agreementID)
+	return err
+}
+
+// ApplyLateFee turns what a late car is running up into an actual charge.
+// It is an explicit act rather than something that accrues on its own: a
+// customer who rang ahead is not to be billed by a background job.
+//
+// Passing 0 waives it, which is the other half of the same decision.
+func (s *Store) ApplyLateFee(agreementID int64, amount float64) error {
+	if amount < 0 {
+		return fmt.Errorf("a late fee cannot be negative")
+	}
+	_, err := s.db.Exec(`UPDATE rental_agreements SET late_fee = ? WHERE id = ?`,
+		amount, agreementID)
+	return err
+}
+
+// SetDepositReturned records handing the deposit back. Separate from
+// payment: a deposit is held, not earned, and it never belonged in any
+// figure of what the business took.
+func (s *Store) SetDepositReturned(agreementID int64, returned bool) error {
+	_, err := s.db.Exec(`UPDATE rental_agreements SET deposit_returned = ? WHERE id = ?`,
+		boolToInt(returned), agreementID)
+	return err
+}
+
+// ── messages ──────────────────────────────────────────────────────────────
+
+// RentalMessage is one text sent to a customer, kept whether or not it got
+// through — a failure is the more useful record of the two.
+type RentalMessage struct {
+	ID          int64  `json:"id"`
+	CustomerID  int64  `json:"customer_id"`
+	AgreementID *int64 `json:"agreement_id"`
+	Phone       string `json:"phone"`
+	Body        string `json:"body"`
+	ProviderSID string `json:"provider_sid"`
+	Status      string `json:"status"`
+	Error       string `json:"error"`
+	SentBy      string `json:"sent_by"`
+	CreatedAt   string `json:"created_at"`
+	// Joined for display, so a log line reads without a second lookup.
+	CustomerName string `json:"customer_name"`
+}
+
+// LogRentalMessage records an attempt. Called for successes and failures
+// alike: "we texted them and Twilio bounced it" is exactly the thing
+// somebody needs to see when a customer says nobody told them.
+func (s *Store) LogRentalMessage(m RentalMessage) (int64, error) {
+	var agreement any
+	if m.AgreementID != nil && *m.AgreementID > 0 {
+		agreement = *m.AgreementID
+	}
+	if m.Status == "" {
+		m.Status = "sent"
+	}
+	res, err := s.db.Exec(`INSERT INTO rental_messages
+		(customer_id, agreement_id, phone, body, provider_sid, status, error, sent_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		m.CustomerID, agreement, m.Phone, m.Body, m.ProviderSID, m.Status, m.Error, m.SentBy)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// RentalMessages lists what was sent, newest first — everything, or just
+// one customer's.
+func (s *Store) RentalMessages(customerID int64, limit int) ([]RentalMessage, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	q := `SELECT m.id, m.customer_id, m.agreement_id, m.phone, m.body, m.provider_sid,
+	             m.status, m.error, m.sent_by, m.created_at, c.name
+	      FROM rental_messages m
+	      JOIN rental_customers c ON c.id = m.customer_id`
+	args := []any{}
+	if customerID > 0 {
+		q += ` WHERE m.customer_id = ?`
+		args = append(args, customerID)
+	}
+	q += ` ORDER BY m.id DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []RentalMessage{}
+	for rows.Next() {
+		var m RentalMessage
+		var agreement sql.NullInt64
+		if err := rows.Scan(&m.ID, &m.CustomerID, &agreement, &m.Phone, &m.Body,
+			&m.ProviderSID, &m.Status, &m.Error, &m.SentBy, &m.CreatedAt,
+			&m.CustomerName); err != nil {
+			return nil, err
+		}
+		if agreement.Valid {
+			id := agreement.Int64
+			m.AgreementID = &id
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ── documents ─────────────────────────────────────────────────────────────
+
+// Document kinds. Free text would make these unfilterable within a week;
+// these cover what a hire desk actually scans.
+const (
+	DocLicence   = "licence"
+	DocAgreement = "agreement"
+	DocInsurance = "insurance"
+	DocDamage    = "damage"
+	DocOther     = "other"
+)
+
+func ValidDocumentKind(k string) bool {
+	switch k {
+	case DocLicence, DocAgreement, DocInsurance, DocDamage, DocOther:
+		return true
+	}
+	return false
+}
+
+// RentalDocument is a file attached to a customer or a hire. The file
+// itself is on disk; this is only where it is and what it is.
+type RentalDocument struct {
+	ID          int64  `json:"id"`
+	CustomerID  *int64 `json:"customer_id"`
+	AgreementID *int64 `json:"agreement_id"`
+	Kind        string `json:"kind"`
+	Filename    string `json:"filename"`
+	StoredPath  string `json:"-"` // never sent to a browser: it is a server path
+	Mime        string `json:"mime"`
+	Bytes       int64  `json:"bytes"`
+	UploadedBy  string `json:"uploaded_by"`
+	CreatedAt   string `json:"created_at"`
+}
+
+func (s *Store) AddRentalDocument(d RentalDocument) (int64, error) {
+	if strings.TrimSpace(d.Filename) == "" || strings.TrimSpace(d.StoredPath) == "" {
+		return 0, fmt.Errorf("a document needs a file")
+	}
+	if !ValidDocumentKind(d.Kind) {
+		d.Kind = DocOther
+	}
+	if (d.CustomerID == nil || *d.CustomerID == 0) && (d.AgreementID == nil || *d.AgreementID == 0) {
+		return 0, fmt.Errorf("a document has to belong to a customer or a hire")
+	}
+
+	var customer, agreement any
+	if d.CustomerID != nil && *d.CustomerID > 0 {
+		customer = *d.CustomerID
+	}
+	if d.AgreementID != nil && *d.AgreementID > 0 {
+		agreement = *d.AgreementID
+	}
+	res, err := s.db.Exec(`INSERT INTO rental_documents
+		(customer_id, agreement_id, kind, filename, stored_path, mime, bytes, uploaded_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		customer, agreement, d.Kind, d.Filename, d.StoredPath, d.Mime, d.Bytes, d.UploadedBy)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// RentalDocuments lists what is attached to one customer or one hire. A
+// hire's documents include the customer's own — their licence is as
+// relevant to this loan as it was to the last one.
+func (s *Store) RentalDocuments(customerID, agreementID int64) ([]RentalDocument, error) {
+	where := []string{}
+	args := []any{}
+	if customerID > 0 {
+		where = append(where, "customer_id = ?")
+		args = append(args, customerID)
+	}
+	if agreementID > 0 {
+		where = append(where, "agreement_id = ?")
+		args = append(args, agreementID)
+	}
+	if len(where) == 0 {
+		return []RentalDocument{}, nil
+	}
+
+	rows, err := s.db.Query(`SELECT id, customer_id, agreement_id, kind, filename,
+		stored_path, mime, bytes, uploaded_by, created_at
+		FROM rental_documents WHERE `+strings.Join(where, " OR ")+`
+		ORDER BY id DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []RentalDocument{}
+	for rows.Next() {
+		var d RentalDocument
+		var cust, agr sql.NullInt64
+		if err := rows.Scan(&d.ID, &cust, &agr, &d.Kind, &d.Filename,
+			&d.StoredPath, &d.Mime, &d.Bytes, &d.UploadedBy, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		if cust.Valid {
+			id := cust.Int64
+			d.CustomerID = &id
+		}
+		if agr.Valid {
+			id := agr.Int64
+			d.AgreementID = &id
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) RentalDocument(id int64) (*RentalDocument, error) {
+	var d RentalDocument
+	var cust, agr sql.NullInt64
+	err := s.db.QueryRow(`SELECT id, customer_id, agreement_id, kind, filename,
+		stored_path, mime, bytes, uploaded_by, created_at
+		FROM rental_documents WHERE id = ?`, id).
+		Scan(&d.ID, &cust, &agr, &d.Kind, &d.Filename, &d.StoredPath, &d.Mime,
+			&d.Bytes, &d.UploadedBy, &d.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if cust.Valid {
+		v := cust.Int64
+		d.CustomerID = &v
+	}
+	if agr.Valid {
+		v := agr.Int64
+		d.AgreementID = &v
+	}
+	return &d, nil
+}
+
+// DeleteRentalDocument removes the row and hands back the path, so the
+// caller can delete the file too. The row goes first: a file left on disk
+// with nothing pointing at it is litter, but a row pointing at a file that
+// is gone is a broken link someone will click.
+func (s *Store) DeleteRentalDocument(id int64) (storedPath string, err error) {
+	if err := s.db.QueryRow(`SELECT stored_path FROM rental_documents WHERE id = ?`, id).
+		Scan(&storedPath); err != nil {
+		return "", err
+	}
+	_, err = s.db.Exec(`DELETE FROM rental_documents WHERE id = ?`, id)
+	return storedPath, err
 }

@@ -380,7 +380,7 @@ func TestLendCarPutsItOutTodayAndTracksTheOdometer(t *testing.T) {
 	customerID, vehicleID := rentalFixtures(t, db)
 	backOn := time.Now().AddDate(0, 0, 5).Format("2006-01-02")
 
-	id, err := db.LendCar(vehicleID, customerID, backOn, 12500, "", "scuff on the nearside")
+	id, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn, MileageNow: 12500, CourtesyForReg: "", Note: "scuff on the nearside"})
 	if err != nil {
 		t.Fatalf("LendCar: %v", err)
 	}
@@ -426,21 +426,21 @@ func TestLendCarValidates(t *testing.T) {
 	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 	backOn := time.Now().AddDate(0, 0, 3).Format("2006-01-02")
 
-	if _, err := db.LendCar(vehicleID, customerID, "", 0, "", ""); err == nil {
+	if _, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: "", MileageNow: 0, CourtesyForReg: "", Note: ""}); err == nil {
 		t.Error("a loan with no return date should be refused")
 	}
-	if _, err := db.LendCar(vehicleID, customerID, yesterday, 0, "", ""); err == nil {
+	if _, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: yesterday, MileageNow: 0, CourtesyForReg: "", Note: ""}); err == nil {
 		t.Error("a return date in the past should be refused")
 	}
-	if _, err := db.LendCar(9999, customerID, backOn, 0, "", ""); err == nil {
+	if _, err := db.LendCar(LendRequest{VehicleID: 9999, CustomerID: customerID, BackOn: backOn, MileageNow: 0, CourtesyForReg: "", Note: ""}); err == nil {
 		t.Error("lending a car that does not exist should be refused")
 	}
 
 	// Two people cannot have the same car.
-	if _, err := db.LendCar(vehicleID, customerID, backOn, 0, "", ""); err != nil {
+	if _, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn, MileageNow: 0, CourtesyForReg: "", Note: ""}); err != nil {
 		t.Fatalf("LendCar: %v", err)
 	}
-	if _, err := db.LendCar(vehicleID, customerID, backOn, 0, "", ""); err == nil {
+	if _, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn, MileageNow: 0, CourtesyForReg: "", Note: ""}); err == nil {
 		t.Error("lending a car that is already out should be refused")
 	}
 }
@@ -452,7 +452,7 @@ func TestLendAndReturnRefuseMileageGoingBackwards(t *testing.T) {
 	customerID, vehicleID := rentalFixtures(t, db)
 	backOn := time.Now().AddDate(0, 0, 3).Format("2006-01-02")
 
-	id, err := db.LendCar(vehicleID, customerID, backOn, 30000, "", "")
+	id, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn, MileageNow: 30000, CourtesyForReg: "", Note: ""})
 	if err != nil {
 		t.Fatalf("LendCar: %v", err)
 	}
@@ -479,7 +479,7 @@ func TestLendAndReturnRefuseMileageGoingBackwards(t *testing.T) {
 	}
 
 	// A second loan cannot start below the reading it came back on.
-	if _, err := db.LendCar(vehicleID, customerID, backOn, 30100, "", ""); err == nil {
+	if _, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn, MileageNow: 30100, CourtesyForReg: "", Note: ""}); err == nil {
 		t.Error("lending out below the recorded mileage should be refused")
 	}
 }
@@ -491,7 +491,7 @@ func TestCourtesyCarRecordsTheCarItIsStandingInFor(t *testing.T) {
 	customerID, vehicleID := rentalFixtures(t, db)
 	backOn := time.Now().AddDate(0, 0, 3).Format("2006-01-02")
 
-	id, err := db.LendCar(vehicleID, customerID, backOn, 0, "ab12 cde", "")
+	id, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn, MileageNow: 0, CourtesyForReg: "ab12 cde", Note: ""})
 	if err != nil {
 		t.Fatalf("LendCar: %v", err)
 	}
@@ -506,7 +506,7 @@ func TestCourtesyCarRecordsTheCarItIsStandingInFor(t *testing.T) {
 	if err := db.BringCarBack(id, 0); err != nil {
 		t.Fatal(err)
 	}
-	id2, err := db.LendCar(vehicleID, customerID, backOn, 0, "", "")
+	id2, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn, MileageNow: 0, CourtesyForReg: "", Note: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -598,11 +598,11 @@ func TestCourtesyLoansListsOnlyLiveCourtesyCars(t *testing.T) {
 	}
 	backOn := time.Now().AddDate(0, 0, 4).Format("2006-01-02")
 
-	courtesy, err := db.LendCar(vehicleID, customerID, backOn, 0, "AB12CDE", "")
+	courtesy, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn, MileageNow: 0, CourtesyForReg: "AB12CDE", Note: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.LendCar(other, customerID, backOn, 0, "", ""); err != nil {
+	if _, err := db.LendCar(LendRequest{VehicleID: other, CustomerID: customerID, BackOn: backOn, MileageNow: 0, CourtesyForReg: "", Note: ""}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -630,7 +630,7 @@ func TestPaymentAndTextStateStickToTheHire(t *testing.T) {
 	db := open(t)
 	customerID, vehicleID := rentalFixtures(t, db)
 	backOn := time.Now().AddDate(0, 0, 2).Format("2006-01-02")
-	id, err := db.LendCar(vehicleID, customerID, backOn, 0, "AB12CDE", "")
+	id, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn, MileageNow: 0, CourtesyForReg: "AB12CDE", Note: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,5 +663,319 @@ func TestPaymentAndTextStateStickToTheHire(t *testing.T) {
 	}
 	if a, _ = db.RentalAgreement(id); a.ReadyTextedAt == "" {
 		t.Error("the ready text should be stamped so nobody sends it twice")
+	}
+}
+
+// The bill: hire, insurance, a late fee only once someone applies it, and
+// whatever extras the car came back with.
+func TestChargeableAddsUpEverythingOwed(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db) // £45/day
+	// Ends three days ago, so it is three days late and running up a fee.
+	ends := time.Now().AddDate(0, 0, -3).Format("2006-01-02")
+	starts := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+
+	id, err := db.CreateRentalAgreement(RentalAgreement{
+		VehicleID: vehicleID, CustomerID: customerID,
+		StartsOn: starts, EndsOn: ends, Status: RentalOut,
+		InsurancePerDay: 12, LateFeePerDay: 25, Deposit: 200,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a, err := db.RentalAgreement(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Days != 5 {
+		t.Fatalf("Days = %d, want 5", a.Days)
+	}
+	if a.Total != 225 {
+		t.Errorf("Total = %v, want 5 × 45", a.Total)
+	}
+	if a.Insurance != 60 {
+		t.Errorf("Insurance = %v, want 5 × 12", a.Insurance)
+	}
+	if a.DaysLate != 3 {
+		t.Errorf("DaysLate = %d, want 3", a.DaysLate)
+	}
+	// What it WOULD cost, without that being a debt yet.
+	if a.LateFeeDue != 75 {
+		t.Errorf("LateFeeDue = %v, want 3 × 25", a.LateFeeDue)
+	}
+	if a.LateFee != 0 {
+		t.Errorf("LateFee = %v — lateness must not charge itself", a.LateFee)
+	}
+	if a.Chargeable != 285 {
+		t.Errorf("Chargeable = %v, want 225 + 60 with no fee applied", a.Chargeable)
+	}
+
+	// Applying it is a decision someone makes.
+	if err := db.ApplyLateFee(id, a.LateFeeDue); err != nil {
+		t.Fatal(err)
+	}
+	a, _ = db.RentalAgreement(id)
+	if a.LateFee != 75 || a.Chargeable != 360 {
+		t.Errorf("after applying: fee %v, chargeable %v, want 75 and 360", a.LateFee, a.Chargeable)
+	}
+
+	// And waiving it is the other half of the same decision.
+	if err := db.ApplyLateFee(id, 0); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ = db.RentalAgreement(id); a.Chargeable != 285 {
+		t.Errorf("after waiving: chargeable %v, want 285", a.Chargeable)
+	}
+
+	// Extras — fuel, a scuff — land on the same bill.
+	if err := db.SetRentalCharges(id, RentalCharges{ExtraCharges: 40, ExtraNote: "returned empty"}); err != nil {
+		t.Fatal(err)
+	}
+	a, _ = db.RentalAgreement(id)
+	if a.ExtraCharges != 40 || a.ExtraNote != "returned empty" || a.Chargeable != 325 {
+		t.Errorf("extras: %+v", a)
+	}
+	if err := db.SetRentalCharges(id, RentalCharges{ExtraCharges: -5}); err == nil {
+		t.Error("a negative extra should be refused — that is a refund, not a charge")
+	}
+
+	// The deposit is held, never part of what was charged.
+	if a.Deposit != 200 {
+		t.Errorf("Deposit = %v, want 200", a.Deposit)
+	}
+	if a.DepositReturned {
+		t.Error("a new hire's deposit has not been given back")
+	}
+	if err := db.SetDepositReturned(id, true); err != nil {
+		t.Fatal(err)
+	}
+	a, _ = db.RentalAgreement(id)
+	if !a.DepositReturned {
+		t.Error("SetDepositReturned did not stick")
+	}
+	if a.Chargeable != 325 {
+		t.Errorf("Chargeable = %v — returning a deposit must not change the bill", a.Chargeable)
+	}
+}
+
+// Lateness has two clocks: a car still out is late against today, one
+// already back is late against the day it came back.
+func TestLatenessStopsCountingOnceTheCarIsBack(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	starts := time.Now().AddDate(0, 0, -10).Format("2006-01-02")
+	ends := time.Now().AddDate(0, 0, -6).Format("2006-01-02")
+	back := time.Now().AddDate(0, 0, -4).Format("2006-01-02")
+
+	id, err := db.CreateRentalAgreement(RentalAgreement{
+		VehicleID: vehicleID, CustomerID: customerID,
+		StartsOn: starts, EndsOn: ends, Status: RentalOut, LateFeePerDay: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := db.RentalAgreement(id)
+	if a.DaysLate != 6 {
+		t.Fatalf("still out: DaysLate = %d, want 6 (against today)", a.DaysLate)
+	}
+
+	if err := db.SetRentalAgreementStatus(id, RentalReturned, back); err != nil {
+		t.Fatal(err)
+	}
+	a, _ = db.RentalAgreement(id)
+	if a.DaysLate != 2 {
+		t.Errorf("returned: DaysLate = %d, want 2 (against the day it came back)", a.DaysLate)
+	}
+	if a.LateFeeDue != 20 {
+		t.Errorf("LateFeeDue = %v, want 2 × 10", a.LateFeeDue)
+	}
+
+	// A cancelled hire is nobody's debt, however long ago its dates were.
+	if err := db.SetRentalAgreementStatus(id, RentalCancelled, ""); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ = db.RentalAgreement(id); a.DaysLate != 0 || a.LateFeeDue != 0 {
+		t.Errorf("a cancelled hire cannot be late: %d days, £%v", a.DaysLate, a.LateFeeDue)
+	}
+}
+
+// A hire on time is not late, which is worth stating because an
+// off-by-one here invents a fee out of nothing.
+func TestAHireReturnedOnTimeIsNotLate(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	future := time.Now().AddDate(0, 0, 3).Format("2006-01-02")
+
+	id, err := db.CreateRentalAgreement(RentalAgreement{
+		VehicleID: vehicleID, CustomerID: customerID,
+		StartsOn: time.Now().Format("2006-01-02"), EndsOn: future,
+		Status: RentalOut, LateFeePerDay: 25,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := db.RentalAgreement(id)
+	if a.DaysLate != 0 || a.LateFeeDue != 0 {
+		t.Errorf("a hire still within its dates is not late: %d days", a.DaysLate)
+	}
+
+	// Back on the very day it was due is still on time.
+	if err := db.SetRentalAgreementStatus(id, RentalReturned, future); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ = db.RentalAgreement(id); a.DaysLate != 0 {
+		t.Errorf("back on the due date is on time, got %d days late", a.DaysLate)
+	}
+}
+
+func TestLendCarSnapshotsTheAgreedRates(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	backOn := time.Now().AddDate(0, 0, 4).Format("2006-01-02")
+
+	id, err := db.LendCar(LendRequest{
+		VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn,
+		InsurancePerDay: 12, LateFeePerDay: 25, Deposit: 150,
+	})
+	if err != nil {
+		t.Fatalf("LendCar: %v", err)
+	}
+	a, _ := db.RentalAgreement(id)
+	if a.InsurancePerDay != 12 || a.LateFeePerDay != 25 || a.Deposit != 150 {
+		t.Errorf("the agreed rates were not kept on the hire: %+v", a)
+	}
+
+	if _, err := db.LendCar(LendRequest{
+		VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn, Deposit: -1,
+	}); err == nil {
+		t.Error("a negative deposit should be refused")
+	}
+}
+
+// Messages are kept whether or not they got through.
+func TestMessageLogKeepsFailuresToo(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	backOn := time.Now().AddDate(0, 0, 2).Format("2006-01-02")
+	hire, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.LogRentalMessage(RentalMessage{
+		CustomerID: customerID, AgreementID: &hire, Phone: "+447700900123",
+		Body: "your car is ready", ProviderSID: "SM1", SentBy: "klon",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.LogRentalMessage(RentalMessage{
+		CustomerID: customerID, Phone: "+447700900123", Body: "second try",
+		Status: "failed", Error: "unverified number", SentBy: "klon",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, err := db.RentalMessages(customerID, 0)
+	if err != nil {
+		t.Fatalf("RentalMessages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("want both messages, got %d", len(msgs))
+	}
+	// Newest first.
+	if msgs[0].Status != "failed" || msgs[0].Error != "unverified number" {
+		t.Errorf("a refused message keeps why: %+v", msgs[0])
+	}
+	if msgs[0].AgreementID != nil {
+		t.Error("a message not about a hire has no hire id")
+	}
+	if msgs[1].AgreementID == nil || *msgs[1].AgreementID != hire {
+		t.Errorf("a message about a hire keeps that link: %+v", msgs[1])
+	}
+	if msgs[1].CustomerName != "Alex Rider" {
+		t.Errorf("the log joins the customer's name for display, got %q", msgs[1].CustomerName)
+	}
+
+	// Another customer's log is their own.
+	other, _ := db.AddRentalCustomer(RentalCustomer{Name: "Nobody"})
+	if got, _ := db.RentalMessages(other, 0); len(got) != 0 {
+		t.Errorf("a customer with no messages has none, got %d", len(got))
+	}
+	if all, _ := db.RentalMessages(0, 0); len(all) != 2 {
+		t.Errorf("no customer filter returns everything, got %d", len(all))
+	}
+}
+
+func TestDocumentsAttachToACustomerOrAHire(t *testing.T) {
+	db := open(t)
+	customerID, vehicleID := rentalFixtures(t, db)
+	backOn := time.Now().AddDate(0, 0, 2).Format("2006-01-02")
+	hire, err := db.LendCar(LendRequest{VehicleID: vehicleID, CustomerID: customerID, BackOn: backOn})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	licence, err := db.AddRentalDocument(RentalDocument{
+		CustomerID: &customerID, Kind: DocLicence, Filename: "licence.jpg",
+		StoredPath: "/data/rental-docs/2026/09/abc.jpg", Mime: "image/jpeg",
+		Bytes: 1024, UploadedBy: "klon",
+	})
+	if err != nil {
+		t.Fatalf("AddRentalDocument: %v", err)
+	}
+	if _, err := db.AddRentalDocument(RentalDocument{
+		AgreementID: &hire, Kind: DocDamage, Filename: "scuff.jpg",
+		StoredPath: "/data/rental-docs/2026/09/def.jpg",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A hire's documents include the customer's own — their licence is as
+	// relevant to this loan as it was to the last one.
+	docs, err := db.RentalDocuments(customerID, hire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 2 {
+		t.Errorf("want both the licence and the damage photo, got %d", len(docs))
+	}
+	if only, _ := db.RentalDocuments(0, hire); len(only) != 1 {
+		t.Errorf("the hire alone has one document, got %d", len(only))
+	}
+
+	// An unrecognised kind is filed as "other" rather than rejected: the
+	// file still matters even if nobody picked a label for it.
+	odd, err := db.AddRentalDocument(RentalDocument{
+		CustomerID: &customerID, Kind: "banana", Filename: "x.pdf", StoredPath: "/p/x.pdf",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ := db.RentalDocument(odd)
+	if d.Kind != DocOther {
+		t.Errorf("Kind = %q, want it filed as other", d.Kind)
+	}
+
+	// A document belonging to nothing has nowhere to be found again.
+	if _, err := db.AddRentalDocument(RentalDocument{
+		Filename: "orphan.pdf", StoredPath: "/p/o.pdf",
+	}); err == nil {
+		t.Error("a document with no customer and no hire should be refused")
+	}
+	if _, err := db.AddRentalDocument(RentalDocument{CustomerID: &customerID}); err == nil {
+		t.Error("a document with no file should be refused")
+	}
+
+	// Deleting hands back the path so the file can go too.
+	path, err := db.DeleteRentalDocument(licence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/data/rental-docs/2026/09/abc.jpg" {
+		t.Errorf("DeleteRentalDocument returned %q, want the stored path", path)
+	}
+	if left, _ := db.RentalDocuments(customerID, 0); len(left) != 1 {
+		t.Errorf("one document left for the customer, got %d", len(left))
 	}
 }

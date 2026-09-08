@@ -47,6 +47,18 @@ func (s *Server) rentalsRoutes(sub fs.FS) http.Handler {
 	api.HandleFunc("POST /api/rentals/agreements/{id}/text-ready", s.json(s.textCarReady))
 	api.HandleFunc("POST /api/rentals/agreements/{id}/pay", s.json(s.startRentalPayment))
 	api.HandleFunc("GET /api/rentals/agreements/{id}/payment", s.json(s.checkRentalPayment))
+	api.HandleFunc("GET /api/rentals/agreements/{id}", s.json(s.rentalAgreement))
+	api.HandleFunc("PATCH /api/rentals/agreements/{id}/charges", s.json(s.setRentalCharges))
+	api.HandleFunc("POST /api/rentals/agreements/{id}/late-fee", s.json(s.applyLateFee))
+	api.HandleFunc("POST /api/rentals/agreements/{id}/deposit", s.json(s.setDepositReturned))
+
+	api.HandleFunc("GET /api/rentals/messages", s.json(s.rentalMessages))
+	api.HandleFunc("POST /api/rentals/messages", s.json(s.sendRentalMessage))
+
+	api.HandleFunc("GET /api/rentals/documents", s.json(s.rentalDocuments))
+	api.HandleFunc("POST /api/rentals/documents", s.uploadRentalDocument)
+	api.HandleFunc("GET /api/rentals/documents/{id}/file", s.serveRentalDocument)
+	api.HandleFunc("DELETE /api/rentals/documents/{id}", s.json(s.deleteRentalDocument))
 
 	api.HandleFunc("GET /api/rentals/customers", s.json(s.rentalCustomers))
 	api.HandleFunc("POST /api/rentals/customers", s.json(s.addRentalCustomer))
@@ -88,19 +100,25 @@ func (s *Server) rentalBoard(r *http.Request) (any, error) { return s.db.RentalB
 // on this date. Everything else on the form is optional detail that only
 // exists at the moment the keys change hands.
 func (s *Server) lendCar(r *http.Request) (any, error) {
-	var body struct {
-		VehicleID      int64   `json:"vehicle_id"`
-		CustomerID     int64   `json:"customer_id"`
-		BackOn         string  `json:"back_on"`
-		MileageNow     float64 `json:"mileage_now"`
-		CourtesyForReg string  `json:"courtesy_for_reg"`
-		Note           string  `json:"note"`
-	}
-	if err := decode(r, &body); err != nil {
+	var req store.LendRequest
+	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
-	id, err := s.db.LendCar(body.VehicleID, body.CustomerID, body.BackOn,
-		body.MileageNow, body.CourtesyForReg, body.Note)
+	// The house rates, unless the counter overrode them for this hire. Read
+	// here rather than defaulted in the store so the price list lives in one
+	// place — the Admin page — and the store only ever records what was
+	// actually agreed.
+	if req.InsurancePerDay == 0 {
+		req.InsurancePerDay = s.settingFloat(store.SetInsurancePerDay)
+	}
+	if req.LateFeePerDay == 0 {
+		req.LateFeePerDay = s.settingFloat(store.SetLateFeePerDay)
+	}
+	if req.Deposit == 0 {
+		req.Deposit = s.settingFloat(store.SetDepositDefault)
+	}
+
+	id, err := s.db.LendCar(req)
 	if err != nil {
 		// A car already out, or a reading below the odometer, is a refusal
 		// rather than a malformed request — 409, shown to the desk as itself.

@@ -341,6 +341,9 @@ async function loadIntegrations() {
   $('tw-from').value = s.twilio_from_number || '';
   $('st-pub').value = s.stripe_publishable_key || '';
   $('st-return').value = s.stripe_return_url || '';
+  $('rt-ins').value = s.rental_insurance_per_day || '';
+  $('rt-late').value = s.rental_late_fee_per_day || '';
+  $('rt-dep').value = s.rental_deposit_default || '';
   $('int-state').innerHTML = [
     `Twilio: ${s.twilio_ready ? ok('ready to send') : warn('not set up')}`,
     `token ${s.twilio_auth_token_set ? ok('saved') : warn('missing')}`,
@@ -361,6 +364,9 @@ $('int-save')?.addEventListener('click', async () => {
         stripe_secret_key: $('st-key').value,
         stripe_publishable_key: $('st-pub').value,
         stripe_return_url: $('st-return').value,
+        rental_insurance_per_day: $('rt-ins').value,
+        rental_late_fee_per_day: $('rt-late').value,
+        rental_deposit_default: $('rt-dep').value,
       },
     });
     // Clear the two secret boxes so a saved key is never sitting in the DOM.

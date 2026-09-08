@@ -370,6 +370,18 @@ CREATE TABLE IF NOT EXISTS rental_agreements (
   payment_url     TEXT NOT NULL DEFAULT '',
   -- When the "your car is ready" text went out, so nobody sends it twice.
   ready_texted_at TEXT NOT NULL DEFAULT '',
+  -- Everything chargeable beyond the hire itself. Rates are snapshotted at
+  -- lend time so changing the price list tomorrow never rewrites what an
+  -- existing agreement was worth; late_fee is written only when someone
+  -- actually applies it, so an overdue car shows what it WOULD cost without
+  -- that becoming a debt nobody agreed to.
+  insurance_per_day REAL NOT NULL DEFAULT 0,
+  late_fee_per_day  REAL NOT NULL DEFAULT 0,
+  late_fee          REAL NOT NULL DEFAULT 0,
+  extra_charges     REAL NOT NULL DEFAULT 0,
+  extra_note        TEXT NOT NULL DEFAULT '',
+  deposit           REAL NOT NULL DEFAULT 0,
+  deposit_returned  INTEGER NOT NULL DEFAULT 0,
   notes       TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL
 );
@@ -421,6 +433,44 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 );
 
 CREATE INDEX IF NOT EXISTS idx_stock_movements_part ON stock_movements(part_id);
+
+-- Every message sent to a rental customer, whatever prompted it. Kept
+-- because "did anyone tell them?" is asked constantly and a phone's sent
+-- box is not a record the business owns.
+CREATE TABLE IF NOT EXISTS rental_messages (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id  INTEGER NOT NULL REFERENCES rental_customers(id),
+  -- Nullable: a message can be about one hire, or just to the customer.
+  agreement_id INTEGER REFERENCES rental_agreements(id),
+  phone        TEXT NOT NULL DEFAULT '',
+  body         TEXT NOT NULL,
+  -- Twilio's own id for the message, so a delivery query has something to
+  -- go on, and 'failed' with the reason when it never got that far.
+  provider_sid TEXT NOT NULL DEFAULT '',
+  status       TEXT NOT NULL DEFAULT 'sent',
+  error        TEXT NOT NULL DEFAULT '',
+  sent_by      TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rental_messages_customer ON rental_messages(customer_id);
+
+-- Scans and photos attached to a customer or a hire: driving licence, the
+-- signed agreement, damage photos at handover. The file itself lives on
+-- disk under DataDir; only its whereabouts and what it is live here.
+CREATE TABLE IF NOT EXISTS rental_documents (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id  INTEGER REFERENCES rental_customers(id),
+  agreement_id INTEGER REFERENCES rental_agreements(id),
+  kind         TEXT NOT NULL DEFAULT 'other',
+  filename     TEXT NOT NULL,
+  stored_path  TEXT NOT NULL,
+  mime         TEXT NOT NULL DEFAULT '',
+  bytes        INTEGER NOT NULL DEFAULT 0,
+  uploaded_by  TEXT NOT NULL DEFAULT '',
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rental_documents_customer  ON rental_documents(customer_id);
+CREATE INDEX IF NOT EXISTS idx_rental_documents_agreement ON rental_documents(agreement_id);
 
 -- Integration settings ------------------------------------------------------
 
@@ -534,6 +584,13 @@ func migrate(db *sql.DB) error {
 			"mot_expires": "ALTER TABLE rental_vehicles ADD COLUMN mot_expires TEXT NOT NULL DEFAULT ''",
 		},
 		"rental_agreements": {
+			"insurance_per_day": "ALTER TABLE rental_agreements ADD COLUMN insurance_per_day REAL NOT NULL DEFAULT 0",
+			"late_fee_per_day":  "ALTER TABLE rental_agreements ADD COLUMN late_fee_per_day REAL NOT NULL DEFAULT 0",
+			"late_fee":          "ALTER TABLE rental_agreements ADD COLUMN late_fee REAL NOT NULL DEFAULT 0",
+			"extra_charges":     "ALTER TABLE rental_agreements ADD COLUMN extra_charges REAL NOT NULL DEFAULT 0",
+			"extra_note":        "ALTER TABLE rental_agreements ADD COLUMN extra_note TEXT NOT NULL DEFAULT ''",
+			"deposit":           "ALTER TABLE rental_agreements ADD COLUMN deposit REAL NOT NULL DEFAULT 0",
+			"deposit_returned":  "ALTER TABLE rental_agreements ADD COLUMN deposit_returned INTEGER NOT NULL DEFAULT 0",
 			"mileage_out":      "ALTER TABLE rental_agreements ADD COLUMN mileage_out REAL NOT NULL DEFAULT 0",
 			"courtesy_for_reg": "ALTER TABLE rental_agreements ADD COLUMN courtesy_for_reg TEXT NOT NULL DEFAULT ''",
 			"paid":             "ALTER TABLE rental_agreements ADD COLUMN paid INTEGER NOT NULL DEFAULT 0",

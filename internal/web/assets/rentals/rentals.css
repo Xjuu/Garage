@@ -165,3 +165,48 @@ tbody tr.row-muted td { color: var(--g4); }
 .swap { color: var(--g4); }
 .pill.flag-soft { color: var(--g5); border-color: var(--g3); background: var(--g05); }
 .car-row .reg { flex-shrink: 0; }
+
+/* ── The hire drawer ─────────────────────────────────────────────────────
+   Wider than the dashboard's own: this is a working surface with a bill,
+   a message thread and a document list on it, not a record to read. */
+#hire-drawer { width: min(680px, 100%); }
+.hd-summary {
+  padding: 14px 16px; margin-bottom: 22px;
+  background: var(--g05); border: 1px solid var(--g2); border-radius: var(--radius);
+}
+.hd-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.hd-line + .hd-line { margin-top: 6px; }
+
+/* The bill as arithmetic rather than a total: every line is something a
+   customer might question, and one number answers none of it. */
+table.bill { width: 100%; border-collapse: collapse; }
+table.bill td { padding: 7px 0; border-bottom: 1px solid var(--g1); font-size: 14px; }
+table.bill td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.bill tr.bill-muted td { color: var(--g4); font-size: 13px; }
+table.bill tr.bill-flag td { color: var(--flag); }
+table.bill tr.bill-total td {
+  border-bottom: 0; border-top: 2px solid var(--ink);
+  font-weight: 800; font-size: 16px; padding-top: 10px;
+}
+
+.drawer-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+
+/* The message thread. Sent and failed read differently at a glance —
+   a bounced text is the one worth noticing. */
+.msg-log { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.msg {
+  padding: 10px 12px; border: 1px solid var(--g2); border-radius: var(--radius-sm);
+  background: var(--g05);
+}
+.msg-failed { border-color: var(--flag); background: var(--flag-bg); }
+.msg-body { font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; }
+.msg-meta { margin-top: 6px; font-size: 11.5px; color: var(--g4); }
+
+.doc-list { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.doc {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 11px; border: 1px solid var(--g2); border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.doc a { font-weight: 700; }
+.doc .btn { margin-left: auto; }

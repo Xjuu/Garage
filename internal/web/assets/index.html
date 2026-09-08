@@ -624,6 +624,19 @@
           <input type="text" id="st-return" placeholder="https://rentals.yourdomain.co.uk/" autocomplete="off"></div>
       </div>
 
+      <div class="m" style="color:var(--g4);font-size:12px;margin:6px 0 12px">
+        House rates for hires. Offered on the lend form and can be overridden per hire;
+        changing them never rewrites a hire already agreed.
+      </div>
+      <div class="grid2" style="margin-bottom:12px">
+        <div class="field"><label for="rt-ins">Insurance (£/day)</label>
+          <input type="number" id="rt-ins" min="0" step="0.01"></div>
+        <div class="field"><label for="rt-late">Late fee (£/day)</label>
+          <input type="number" id="rt-late" min="0" step="0.01"></div>
+        <div class="field"><label for="rt-dep">Default deposit (£)</label>
+          <input type="number" id="rt-dep" min="0" step="0.01"></div>
+      </div>
+
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn solid" id="int-save">Save keys</button>
         <span id="int-status" style="font-size:13px;align-self:center"></span>

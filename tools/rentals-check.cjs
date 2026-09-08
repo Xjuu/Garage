@@ -67,10 +67,36 @@ const OUT = [
     courtesy_for_reg: '', days: 3, total: 120 },
 ];
 
+// One hire with every kind of money on it: five days at 45, insurance,
+// three days late at 25 not yet charged, and extras.
+const HIRE = {
+  id: 1, customer_id: 7, customer_name: 'Alex Rider', phone: '+447700900123',
+  registration: 'RE21NTL', make: 'Toyota', model: 'Corolla',
+  starts_on: '2026-09-01', ends_on: yesterday, status: 'out',
+  courtesy_for_reg: 'AB12CDE', days: 5, daily_rate: 45, total: 225,
+  insurance_per_day: 12, insurance: 60,
+  late_fee_per_day: 25, days_late: 3, late_fee_due: 75, late_fee: 0,
+  extra_charges: 40, extra_note: 'returned empty',
+  deposit: 150, deposit_returned: false, paid: false, chargeable: 325,
+};
+const MESSAGES = [
+  { id: 2, customer_id: 7, body: 'second try', status: 'failed',
+    error: 'unverified number', sent_by: 'klon', created_at: '2026-09-08 10:00' },
+  { id: 1, customer_id: 7, body: 'your car is ready', status: 'sent',
+    sent_by: 'klon', created_at: '2026-09-08 09:00' },
+];
+const DOCS = [
+  { id: 5, kind: 'licence', filename: 'licence.jpg', bytes: 204800,
+    created_at: '2026-09-08', uploaded_by: 'klon' },
+];
+
 const fetchCalls = [];
 let failNext = null;
 async function fakeFetch(url, opts = {}) {
-  fetchCalls.push({ url, opts, body: opts.body ? JSON.parse(opts.body) : undefined });
+  fetchCalls.push({
+    url, opts,
+    body: typeof opts.body === 'string' ? JSON.parse(opts.body) : undefined,
+  });
   const json = (v, status = 200) => ({ ok: status < 400, status, json: async () => v });
   if (failNext && opts.method === 'POST') {
     const f = failNext; failNext = null;
@@ -94,9 +120,30 @@ async function fakeFetch(url, opts = {}) {
     });
   }
   if (url === '/api/rentals/courtesy') return json([OUT[0]]);
+  if (url === '/api/rentals/settings') {
+    return json({ rental_insurance_per_day: '12', rental_late_fee_per_day: '25',
+      rental_deposit_default: '150' });
+  }
+  if (/^\/api\/rentals\/agreements\/\d+$/.test(url)) return json(HIRE);
+  if (url.startsWith('/api/rentals/messages')) {
+    if (opts.method === 'POST') return json({ ok: true, sent_to: '+447700900123' });
+    return json(MESSAGES);
+  }
+  if (url.startsWith('/api/rentals/documents')) {
+    if (opts.method === 'DELETE') return json({ ok: true });
+    return json(DOCS);
+  }
   if (url.startsWith('/api/rentals/agreements')) return json(OUT);
   if (url.startsWith('/api/rentals/vehicles')) return json([]);
   return json({ ok: true });
+}
+
+// A vm context has no FormData, and without one the document upload path
+// throws a ReferenceError that kills the run rather than failing a check —
+// so the browser API it depends on is modelled rather than left absent.
+class FakeFormData {
+  constructor() { this.fields = {}; }
+  append(k, v) { this.fields[k] = v; }
 }
 
 const errors = [];
@@ -117,6 +164,7 @@ const ctx = vm.createContext({
   },
   location: { href: '' },
   navigator: { clipboard: { writeText: async () => {} } },
+  FormData: FakeFormData,
   open() {},
   setTimeout, clearTimeout,
   fetch: fakeFetch,
@@ -343,6 +391,158 @@ function ok(cond, label) {
   await ctx.takePayment(1);
   ok(fetchCalls.some((c2) => c2.url === '/api/rentals/agreements/1/pay' &&
     c2.opts.method === 'POST'), 'taking payment opens a checkout for that hire');
+
+  // ── the hire drawer ──────────────────────────────────────────────────
+  body.dataset.readonly = '';
+  await ctx.openHire(1);
+  await wait(10);
+  ok(store['hire-drawer'].classList.contains('open'), 'a hire opens in its own drawer');
+  ok(store['hd-title'].textContent === 'RE21NTL · Alex Rider', 'titled with the car and who has it');
+
+  const bill = store['hd-bill'].innerHTML;
+  ok(bill.includes('225.00'), 'the bill shows the hire itself');
+  ok(bill.includes('Insurance') && bill.includes('60.00'), 'and the insurance taken');
+  ok(bill.includes('325.00'), 'and totals what is actually owed');
+  // The fee is showing as running up, not as charged.
+  ok(/not charged/.test(bill) && bill.includes('75.00'),
+    'a late fee not yet applied is shown as owed-if-charged, not as a debt');
+  ok(bill.includes('Deposit held') && bill.includes('150.00'),
+    'the deposit is shown as held, separate from the bill');
+  ok(bill.includes('returned empty'), 'and extras say what they were for');
+
+  // Applying, waiving, extras, deposit — each posts to its own endpoint.
+  for (const [btn, url, method] of [
+    ['hd-late-fee', '/api/rentals/agreements/1/late-fee', 'POST'],
+    ['hd-waive-late', '/api/rentals/agreements/1/late-fee', 'POST'],
+    ['hd-save-charges', '/api/rentals/agreements/1/charges', 'PATCH'],
+    ['hd-deposit', '/api/rentals/agreements/1/deposit', 'POST'],
+  ]) {
+    fetchCalls.length = 0;
+    await store[btn].fire('click');
+    await wait(10);
+    ok(fetchCalls.some((c2) => c2.url === url && c2.opts.method === method),
+      `${btn} posts to ${url}`);
+  }
+  // Waiving is explicitly zero, not "no amount".
+  fetchCalls.length = 0;
+  await store['hd-waive-late'].fire('click');
+  await wait(10);
+  const waive = fetchCalls.find((c2) => c2.url.endsWith('/late-fee'));
+  ok(waive && waive.body.amount === 0,
+    'waiving sends an explicit 0 rather than leaving it to the default: ' + JSON.stringify(waive && waive.body));
+
+  // ── messages ─────────────────────────────────────────────────────────
+  const log = store['hd-messages'].innerHTML;
+  ok(log.includes('your car is ready'), 'the thread shows what was sent');
+  ok(log.includes('msg-failed') && log.includes('unverified number'),
+    'and a bounced text is kept, with why');
+
+  fetchCalls.length = 0;
+  store['hd-message'].value = '';
+  await store['hd-send'].fire('click');
+  await wait(10);
+  ok(!fetchCalls.some((c2) => c2.url.startsWith('/api/rentals/messages') && c2.opts.method === 'POST'),
+    'an empty message is not sent');
+  ok(/type something/i.test(store['hd-msg-err'].textContent), 'and says so');
+
+  store['hd-message'].value = 'Your car will be ready tomorrow.';
+  fetchCalls.length = 0;
+  await store['hd-send'].fire('click');
+  await wait(10);
+  const sent = fetchCalls.find((c2) => c2.url.startsWith('/api/rentals/messages') && c2.opts.method === 'POST');
+  ok(sent && sent.body.body === 'Your car will be ready tomorrow.' &&
+     sent.body.customer_id === 7 && sent.body.agreement_id === 1,
+    'a free-text message goes with the customer and the hire: ' + JSON.stringify(sent && sent.body));
+
+  // ── documents ────────────────────────────────────────────────────────
+  const docs = store['hd-docs'].innerHTML;
+  ok(docs.includes('licence.jpg'), 'documents on the hire are listed');
+  ok(docs.includes('/api/rentals/documents/5/file'), 'each one links to the file itself');
+  ok(docs.includes('data-del-doc="5"'), 'and can be deleted');
+
+  // Uploading with nothing chosen says so rather than posting an empty form.
+  fetchCalls.length = 0;
+  store['hd-doc-file'].files = [];
+  await store['hd-doc-upload'].fire('click');
+  await wait(10);
+  ok(/choose a file/i.test(store['hd-doc-err'].textContent),
+    'uploading nothing asks for a file: ' + JSON.stringify(store['hd-doc-err'].textContent));
+
+  // The upload itself: multipart, with the file and what it belongs to.
+  store['hd-doc-file'].files = [{ name: 'licence.jpg' }];
+  store['hd-doc-kind'].value = 'licence';
+  fetchCalls.length = 0;
+  await store['hd-doc-upload'].fire('click');
+  await wait(10);
+  const up = fetchCalls.find((c2) => c2.url === '/api/rentals/documents' && c2.opts.method === 'POST');
+  ok(!!up, 'uploading posts the file to the documents endpoint');
+  ok(up && up.opts.body.fields.kind === 'licence' &&
+     String(up.opts.body.fields.agreement_id) === '1' &&
+     String(up.opts.body.fields.customer_id) === '7',
+    'with what it is and what it belongs to: ' + JSON.stringify(up && up.opts.body.fields));
+  ok(up && up.opts.headers['X-CSRF-Token'] === 'test-csrf-token',
+    'and the CSRF token, which a multipart post has to carry itself');
+
+  // A read-only account cannot upload either — the multipart path bypasses
+  // api(), so the guard has to be repeated there.
+  body.dataset.readonly = 'true';
+  store['hd-doc-file'].files = [{ name: 'x.pdf' }];
+  fetchCalls.length = 0;
+  await store['hd-doc-upload'].fire('click');
+  await wait(10);
+  ok(/view-only/i.test(store['hd-doc-err'].textContent),
+    'a read-only account cannot upload documents: ' + JSON.stringify(store['hd-doc-err'].textContent));
+  ok(!fetchCalls.some((c2) => c2.url === '/api/rentals/documents'),
+    'and nothing is posted');
+  body.dataset.readonly = '';
+
+  // ── editing a car ────────────────────────────────────────────────────
+  ctx.openCarModal(FREE[0]);
+  ok(store['car-modal-title'].textContent === 'Edit this car', 'editing reuses the add form');
+  ok(store['c-reg'].value === 'RE24NTL' && store['c-mileage'].value === '41200',
+    'prefilled from the car');
+  ok(store['car-delete'].hidden === false, 'and offers to delete it');
+  ok(store['car-extra'].hidden === false, 'with its details already open — there is something to see');
+
+  fetchCalls.length = 0;
+  store['c-colour'].value = 'Blue';
+  await store['car-save'].fire('click');
+  await wait(10);
+  const edit = fetchCalls.find((c2) => c2.url === '/api/rentals/vehicles/11');
+  ok(edit && edit.opts.method === 'PATCH' && edit.body.colour === 'Blue',
+    'saving an edit PATCHes that car: ' + JSON.stringify(edit && edit.body));
+
+  ctx.openCarModal(null);
+  ok(store['car-modal-title'].textContent === 'Add one of our cars' && store['car-delete'].hidden,
+    'adding a new one has no delete and its own title');
+
+  // ── editing a customer ───────────────────────────────────────────────
+  ctx.openCustomerModal({ id: 7, name: 'Alex Rider', phone: '+447700900123',
+    email: '', licence_no: 'RIDER901', address: '', notes: '' });
+  ok(store['cust-modal'].classList.contains('open'), 'a customer opens in its own form');
+  ok(store['cu-name'].value === 'Alex Rider' && store['cu-licence'].value === 'RIDER901',
+    'prefilled from the customer');
+  fetchCalls.length = 0;
+  await store['cust-save'].fire('click');
+  await wait(10);
+  const cu = fetchCalls.find((c2) => c2.url === '/api/rentals/customers/7');
+  ok(cu && cu.opts.method === 'PATCH', 'saving PATCHes that customer');
+
+  // ── the house rates reach the lend form ──────────────────────────────
+  await ctx.loadRates();
+  await ctx.openLend('11');
+  await wait(10);
+  ok(store['l-insurance'].value === '12' && store['l-latefee'].value === '25' &&
+     store['l-deposit'].value === '150',
+    'the lend form offers the house rates without retyping them');
+  store['l-customer'].value = '7';
+  fetchCalls.length = 0;
+  await store['lend-save'].fire('click');
+  await wait(10);
+  const lent = fetchCalls.find((c2) => c2.url === '/api/rentals/lend');
+  ok(lent && lent.body.insurance_per_day === 12 && lent.body.late_fee_per_day === 25 &&
+     lent.body.deposit === 150,
+    'and sends them with the hire: ' + JSON.stringify(lent && lent.body));
 
   process.exit(failed ? 1 : 0);
 })();
