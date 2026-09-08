@@ -80,6 +80,7 @@ function toast(msg, bad = false) {
 const state = {
   view: 'today',
   rates: {},     // the house price list, loaded once
+  settings: null,
   hire: null,    // the agreement open in the drawer
   editingCar: null,
   editingCustomer: null,
@@ -105,6 +106,12 @@ function show(view) {
 
 document.querySelectorAll('#tabs button').forEach((b) =>
   b.addEventListener('click', () => show(b.dataset.view)));
+
+// Changing keys is an admin act — the server enforces that, and hiding the
+// tab from everyone else stops it being a door that opens onto a 403.
+if (document.body.dataset.role && document.body.dataset.role !== 'admin') {
+  $('tab-settings').hidden = true;
+}
 
 // ── today ─────────────────────────────────────────────────────────────────
 
@@ -191,6 +198,8 @@ async function loadToday() {
     b.addEventListener('click', () => openBack(b.dataset.back, b.dataset.label)));
   document.querySelectorAll('[data-open-hire]').forEach((b) =>
     b.addEventListener('click', () => openHire(b.dataset.openHire).catch((e) => toast(e.message, true))));
+
+  renderSetupNote();
 }
 
 /** Colour and what is on the clock — the two things that tell one otherwise
@@ -279,13 +288,33 @@ async function setStatus(id, status, msg) {
   } catch (e) { toast(e.message, true); }
 }
 
+/** Why an action cannot be taken, or '' when it can. Returned as a
+    disabled-with-a-reason rather than left to fail on click: "Stripe is not
+    set up" is worth knowing before pressing, not after. */
+function blockedBecause(what) {
+  const st = state.settings;
+  if (!st) return '';
+  if (what === 'pay' && !st.stripe_ready) return 'Card payments are not set up — see Settings';
+  if (what === 'text' && !st.twilio_ready) return 'Texting is not set up — see Settings';
+  return '';
+}
+
+function actionBtn(label, attr, id, extraClass = '') {
+  const why = blockedBecause(attr === 'data-pay' ? 'pay' : 'text');
+  const cls = `btn sm ${extraClass}`.trim();
+  if (why) return `<button class="${cls}" disabled title="${esc(why)}">${esc(label)}</button>`;
+  return `<button class="${cls}" ${attr}="${id}">${esc(label)}</button>`;
+}
+
 function hireActions(a) {
   const money = a.paid
     ? '<span class="pill">Paid</span>'
-    : `<button class="btn sm" data-pay="${a.id}">Take payment</button>`;
+    : actionBtn('Take payment', 'data-pay', a.id);
   if (a.status === 'out') {
-    return `${money}
-      <button class="btn sm" data-text="${a.id}"${a.ready_texted_at ? ' disabled title="Already sent"' : ''}>Text: car ready</button>
+    const text = a.ready_texted_at
+      ? '<button class="btn sm" disabled title="Already sent">Text: car ready</button>'
+      : actionBtn('Text: car ready', 'data-text', a.id);
+    return `${money} ${text}
       <button class="btn sm" data-return="${a.id}" data-label="${esc(a.registration)} · ${esc(a.customer_name)}">Returned</button>`;
   }
   if (a.status === 'returned') return money;
@@ -323,7 +352,10 @@ async function loadCourtesy() {
               ${isOverdue(a) ? '<span class="pill flag">Overdue</span>' : ''}
             </div>
           </div>
-          <button class="btn sm" data-text="${a.id}"${a.ready_texted_at ? ' disabled title="Already sent"' : ''}>Text: car ready</button>
+          ${a.ready_texted_at
+            ? '<button class="btn sm" disabled title="Already sent">Text: car ready</button>'
+            : actionBtn('Text: car ready', 'data-text', a.id)}
+          <button class="btn sm" data-open-hire="${a.id}">Open</button>
           <button class="btn sm" data-back="${a.id}" data-label="${esc(a.registration)} · ${esc(a.customer_name)}">It's back</button>
         </div>`).join('')
     : '<div class="empty-box"><strong>No courtesy cars out</strong>A loan becomes one when you say whose car is in for repair.</div>';
@@ -332,6 +364,8 @@ async function loadCourtesy() {
     b.addEventListener('click', () => openBack(b.dataset.back, b.dataset.label)));
   document.querySelectorAll('[data-text]').forEach((b) =>
     b.addEventListener('click', () => textCarReady(b.dataset.text)));
+  document.querySelectorAll('[data-open-hire]').forEach((b) =>
+    b.addEventListener('click', () => openHire(b.dataset.openHire).catch((e) => toast(e.message, true))));
 }
 
 // ── money ─────────────────────────────────────────────────────────────────
@@ -787,6 +821,19 @@ async function openHire(id) {
     ${a.notes ? `<div class="hd-line car-sub">${esc(a.notes)}</div>` : ''}`;
 
   renderBill(a);
+  // The same "say why" treatment inside the drawer: a disabled button with
+  // a reason beats a button that errors.
+  const payWhy = blockedBecause('pay');
+  $('hd-pay').disabled = !!payWhy || a.paid;
+  $('hd-pay').title = payWhy || (a.paid ? 'Already paid' : '');
+  $('hd-check-pay').disabled = !!payWhy;
+  const textWhy = blockedBecause('text');
+  $('hd-send').disabled = !!textWhy;
+  $('hd-send').title = textWhy;
+  $('hd-send-ready').disabled = !!textWhy;
+  $('hd-send-ready').title = textWhy;
+  $('hd-msg-err').textContent = textWhy;
+
   $('hd-extra').value = a.extra_charges || '';
   $('hd-extra-note').value = a.extra_note || '';
   $('hd-message').value = '';
@@ -989,6 +1036,93 @@ $('hd-doc-upload').addEventListener('click', async () => {
   btn.disabled = false;
 });
 
+// ── settings ──────────────────────────────────────────────────────────────
+
+/** The price list and the two outside services, edited here rather than on
+    the dashboard: the person who lends cars out is the person who knows
+    what a day's insurance costs, and they are already on this site. */
+async function loadSettings() {
+  const st = await api('/api/rentals/settings');
+  state.settings = st;
+
+  $('set-ins').value = st.rental_insurance_per_day || '';
+  $('set-late').value = st.rental_late_fee_per_day || '';
+  $('set-dep').value = st.rental_deposit_default || '';
+  $('set-tw-sid').value = st.twilio_account_sid || '';
+  $('set-tw-from').value = st.twilio_from_number || '';
+  $('set-st-pub').value = st.stripe_publishable_key || '';
+  $('set-st-return').value = st.stripe_return_url || '';
+  // The two secrets are never sent back, so their boxes always start empty
+  // — the state line beside the heading is how you know one is saved.
+  $('set-tw-token').value = '';
+  $('set-st-key').value = '';
+
+  $('set-tw-state').innerHTML = st.twilio_ready
+    ? '<span class="pill">ready</span>'
+    : '<span class="pill flag">not set up</span>';
+  $('set-st-state').innerHTML = st.stripe_ready
+    ? '<span class="pill">ready</span>'
+    : '<span class="pill flag">not set up</span>';
+}
+
+$('set-save').addEventListener('click', async () => {
+  $('set-msg').textContent = 'Saving…';
+  try {
+    await api('/api/rentals/settings', {
+      method: 'POST',
+      json: {
+        rental_insurance_per_day: $('set-ins').value,
+        rental_late_fee_per_day: $('set-late').value,
+        rental_deposit_default: $('set-dep').value,
+        twilio_account_sid: $('set-tw-sid').value,
+        twilio_auth_token: $('set-tw-token').value,
+        twilio_from_number: $('set-tw-from').value,
+        stripe_secret_key: $('set-st-key').value,
+        stripe_publishable_key: $('set-st-pub').value,
+        stripe_return_url: $('set-st-return').value,
+      },
+    });
+    $('set-msg').textContent = 'Saved';
+    await loadSettings();
+    await loadRates();
+    renderSetupNote();
+  } catch (e) {
+    $('set-msg').textContent = e.message;
+  }
+});
+
+$('set-tw-send').addEventListener('click', async () => {
+  const to = $('set-tw-test').value.trim();
+  if (!to) { $('set-tw-msg').textContent = 'Put a number in first.'; return; }
+  $('set-tw-msg').textContent = 'Sending…';
+  try {
+    await api('/api/rentals/settings/test-text', { method: 'POST', json: { to } });
+    $('set-tw-msg').textContent = 'Sent — check the phone.';
+  } catch (e) {
+    $('set-tw-msg').textContent = e.message;
+  }
+});
+
+/** Says what is not set up, on the page someone is already looking at,
+    rather than letting them find out by pressing a button that fails.
+    Silent once everything works — a permanent strip is one nobody reads. */
+function renderSetupNote() {
+  const st = state.settings || {};
+  const missing = [];
+  if (!st.twilio_ready) missing.push('texting');
+  if (!st.stripe_ready) missing.push('card payments');
+  if (!st.rental_insurance_per_day && !st.rental_late_fee_per_day) missing.push('prices');
+
+  const note = $('setup-note');
+  if (!missing.length) { note.hidden = true; note.innerHTML = ''; return; }
+  note.hidden = false;
+  note.innerHTML =
+    `<strong>Not set up yet:</strong> ${esc(missing.join(', '))}.
+     Texts and payments will refuse until their keys are in.
+     <a href="#" id="setup-note-link">Open Settings</a>`;
+  $('setup-note-link').addEventListener('click', (e) => { e.preventDefault(); show('settings'); });
+}
+
 // ── boot ──────────────────────────────────────────────────────────────────
 
 $('btn-logout').addEventListener('click', async () => {
@@ -1001,6 +1135,7 @@ $('btn-logout').addEventListener('click', async () => {
 async function loadRates() {
   try {
     const s2 = await api('/api/rentals/settings');
+    state.settings = s2;
     state.rates = {
       insurance: s2.rental_insurance_per_day || '',
       lateFee: s2.rental_late_fee_per_day || '',
@@ -1011,6 +1146,7 @@ async function loadRates() {
 
 Object.assign(viewLoaders, {
   today: loadToday,
+  settings: loadSettings,
   courtesy: loadCourtesy,
   money: loadMoney,
   hires: loadHires,
@@ -1018,5 +1154,6 @@ Object.assign(viewLoaders, {
   customers: loadCustomers,
 });
 
-loadRates();
-show('today');
+// The price list and setup state are needed before the first board renders,
+// or its buttons decide whether they can work from an empty answer.
+loadRates().then(() => show('today'));

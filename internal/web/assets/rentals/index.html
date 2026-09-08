@@ -27,6 +27,7 @@
     <button role="tab" data-view="courtesy" aria-selected="false">Courtesy cars</button>
     <button role="tab" data-view="hires" aria-selected="false">Hires</button>
     <button role="tab" data-view="money" aria-selected="false">Money</button>
+    <button role="tab" data-view="settings" aria-selected="false" id="tab-settings">Settings</button>
     <button role="tab" data-view="cars" aria-selected="false">Cars</button>
     <button role="tab" data-view="customers" aria-selected="false">Customers</button>
   </nav>
@@ -41,6 +42,10 @@
       <div class="spacer"></div>
       <button class="btn solid" id="btn-add-car">+ Add a loan car</button>
     </div>
+
+    <!-- Filled in only when something needed is not set up. Silent when
+         everything is, rather than a permanent strip nobody reads. -->
+    <div class="note" id="setup-note" hidden></div>
 
     <div class="tiles" id="today-tiles"></div>
 
@@ -75,6 +80,70 @@
         <th>Car</th><th class="num">Hires</th><th class="num">Days out</th><th class="num">Billed</th>
       </tr></thead><tbody id="car-earnings"></tbody></table>
     </div></div>
+  </section>
+
+  <!-- Settings: the price list and the two outside services, where they
+       are actually used rather than on another site -->
+  <section class="view" id="view-settings">
+    <div class="view-head"><h2>Settings</h2>
+      <span class="sub">Prices, texting and card payments.</span></div>
+
+    <div class="section-title">Prices</div>
+    <div class="panel form-panel">
+      <div class="m settings-hint">
+        Offered on the lend form and changeable per hire. Changing them never
+        rewrites a hire already agreed.
+      </div>
+      <div class="grid2">
+        <div class="field"><label for="set-ins">Insurance (£/day)</label>
+          <input type="number" id="set-ins" min="0" step="0.01" placeholder="0"></div>
+        <div class="field"><label for="set-late">Late fee (£/day)</label>
+          <input type="number" id="set-late" min="0" step="0.01" placeholder="0"></div>
+        <div class="field"><label for="set-dep">Default deposit (£)</label>
+          <input type="number" id="set-dep" min="0" step="0.01" placeholder="0"></div>
+      </div>
+    </div>
+
+    <div class="section-title">Texting <span class="count-plain" id="set-tw-state"></span></div>
+    <div class="panel form-panel">
+      <div class="m settings-hint">
+        From your Twilio console. The token is never shown back — leave it blank
+        to keep the one already saved.
+      </div>
+      <div class="grid2">
+        <div class="field"><label for="set-tw-sid">Account SID</label>
+          <input type="text" id="set-tw-sid" placeholder="AC…" autocomplete="off"></div>
+        <div class="field"><label for="set-tw-token">Auth token</label>
+          <input type="password" id="set-tw-token" placeholder="leave blank to keep" autocomplete="new-password"></div>
+        <div class="field"><label for="set-tw-from">Send from (number)</label>
+          <input type="text" id="set-tw-from" placeholder="+44…" autocomplete="off"></div>
+        <div class="field"><label for="set-tw-test">Send a test to</label>
+          <input type="text" id="set-tw-test" placeholder="+44…" autocomplete="off"></div>
+      </div>
+      <button class="btn" id="set-tw-send">Send test text</button>
+      <span class="form-status" id="set-tw-msg"></span>
+    </div>
+
+    <div class="section-title">Card payments <span class="count-plain" id="set-st-state"></span></div>
+    <div class="panel form-panel">
+      <div class="m settings-hint">
+        From your Stripe dashboard. The secret key is never shown back.
+        The return URL is where a customer lands after paying.
+      </div>
+      <div class="grid2">
+        <div class="field"><label for="set-st-key">Secret key</label>
+          <input type="password" id="set-st-key" placeholder="leave blank to keep" autocomplete="new-password"></div>
+        <div class="field"><label for="set-st-pub">Publishable key</label>
+          <input type="text" id="set-st-pub" placeholder="pk_…" autocomplete="off"></div>
+      </div>
+      <div class="field"><label for="set-st-return">Return URL</label>
+        <input type="text" id="set-st-return" placeholder="https://rentals.yourdomain.co.uk/" autocomplete="off"></div>
+    </div>
+
+    <div class="settings-save">
+      <button class="btn solid" id="set-save">Save settings</button>
+      <span class="form-status" id="set-msg"></span>
+    </div>
   </section>
 
   <!-- Hires -->

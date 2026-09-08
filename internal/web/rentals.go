@@ -44,6 +44,8 @@ func (s *Server) rentalsRoutes(sub fs.FS) http.Handler {
 	api.HandleFunc("GET /api/rentals/stats", s.json(s.rentalStats))
 	api.HandleFunc("GET /api/rentals/courtesy", s.json(s.courtesyLoans))
 	api.HandleFunc("GET /api/rentals/settings", s.json(s.integrationSettings))
+	api.HandleFunc("POST /api/rentals/settings", s.requireAdmin(s.json(s.saveIntegrationSettings)))
+	api.HandleFunc("POST /api/rentals/settings/test-text", s.requireAdmin(s.json(s.testTwilio)))
 	api.HandleFunc("POST /api/rentals/agreements/{id}/text-ready", s.json(s.textCarReady))
 	api.HandleFunc("POST /api/rentals/agreements/{id}/pay", s.json(s.startRentalPayment))
 	api.HandleFunc("GET /api/rentals/agreements/{id}/payment", s.json(s.checkRentalPayment))

@@ -47,6 +47,10 @@ function makeEl(id) {
 
 const store = {};
 ids.forEach((i) => { store[i] = makeEl(i); });
+// Written into #setup-note at runtime, so it is absent from the static
+// HTML but present in a real page — same reason ui-check.cjs seeds the
+// count badges buildNav inserts.
+store['setup-note-link'] = makeEl('setup-note-link');
 const body = makeEl('body');
 
 const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
@@ -90,6 +94,15 @@ const DOCS = [
     created_at: '2026-09-08', uploaded_by: 'klon' },
 ];
 
+// A configured install by default; the checks about an unconfigured one
+// set that state deliberately, so the two never depend on ordering.
+let SETTINGS = {
+  rental_insurance_per_day: '12', rental_late_fee_per_day: '25', rental_deposit_default: '150',
+  twilio_ready: true, stripe_ready: true,
+  twilio_account_sid: 'AC1', twilio_from_number: '+441',
+  stripe_publishable_key: 'pk_1', stripe_return_url: 'https://r/',
+};
+
 const fetchCalls = [];
 let failNext = null;
 async function fakeFetch(url, opts = {}) {
@@ -120,9 +133,9 @@ async function fakeFetch(url, opts = {}) {
     });
   }
   if (url === '/api/rentals/courtesy') return json([OUT[0]]);
-  if (url === '/api/rentals/settings') {
-    return json({ rental_insurance_per_day: '12', rental_late_fee_per_day: '25',
-      rental_deposit_default: '150' });
+  if (url.startsWith('/api/rentals/settings')) {
+    if (opts.method === 'POST') return json({ ok: true });
+    return json(SETTINGS);
   }
   if (/^\/api\/rentals\/agreements\/\d+$/.test(url)) return json(HIRE);
   if (url.startsWith('/api/rentals/messages')) {
@@ -189,6 +202,11 @@ function ok(cond, label) {
 (async () => {
   ok(errors.length === 0, 'rentals app.js loads without throwing: ' + errors.join('; '));
   await wait(20);
+  // boot() chains loadRates().then(show), so give both a turn before
+  // asserting on what the board rendered.
+  await ctx.loadRates();
+  await ctx.loadToday();
+  await wait(10);
 
   // ── the board ────────────────────────────────────────────────────────
   ok(store['board-sub'].textContent === '2 free to lend · 2 out with customers',
@@ -543,6 +561,78 @@ function ok(cond, label) {
   ok(lent && lent.body.insurance_per_day === 12 && lent.body.late_fee_per_day === 25 &&
      lent.body.deposit === 150,
     'and sends them with the hire: ' + JSON.stringify(lent && lent.body));
+
+  // ── nothing set up: say so, do not fail on click ─────────────────────
+  SETTINGS = {
+    rental_insurance_per_day: '', rental_late_fee_per_day: '', rental_deposit_default: '',
+    twilio_ready: false, stripe_ready: false,
+  };
+  await ctx.loadRates();
+  await ctx.loadToday();
+  await wait(10);
+  ok(store['setup-note'].hidden === false, 'an unconfigured install says so on the page it opens on');
+  const note = store['setup-note'].innerHTML;
+  ok(note.includes('texting') && note.includes('card payments') && note.includes('prices'),
+    'naming what is missing: ' + note.replace(/<[^>]*>/g, ' ').trim());
+  ok(note.includes('Open Settings'), 'and offering the way to fix it');
+
+  await ctx.loadHires();
+  const blocked = store['hire-rows'].innerHTML;
+  ok(blocked.includes('disabled') && /not set up/.test(blocked),
+    'the buttons that cannot work are disabled with the reason, not left to fail');
+  ok(!blocked.includes('data-pay='),
+    'a payment button that cannot work is not wired to be pressed');
+
+  // ── once configured, the warning goes and the buttons come back ──────
+  SETTINGS = {
+    rental_insurance_per_day: '12', rental_late_fee_per_day: '25', rental_deposit_default: '150',
+    twilio_ready: true, stripe_ready: true,
+    twilio_account_sid: 'AC1', twilio_from_number: '+441',
+    stripe_publishable_key: 'pk_1', stripe_return_url: 'https://r/',
+  };
+  await ctx.loadRates();
+  await ctx.loadToday();
+  await wait(10);
+  ok(store['setup-note'].hidden === true,
+    'a working install is not nagged — the strip goes silent');
+  await ctx.loadHires();
+  ok(store['hire-rows'].innerHTML.includes('data-pay='),
+    'and the actions are live again');
+
+  // ── the settings form itself ─────────────────────────────────────────
+  await ctx.loadSettings();
+  ok(store['set-ins'].value === '12' && store['set-late'].value === '25' &&
+     store['set-dep'].value === '150', 'the settings form shows the saved price list');
+  ok(store['set-tw-sid'].value === 'AC1', 'and the public half of the credentials');
+  ok(store['set-tw-token'].value === '' && store['set-st-key'].value === '',
+    'but never a secret — those boxes always start empty');
+  ok(store['set-tw-state'].innerHTML.includes('ready') &&
+     store['set-st-state'].innerHTML.includes('ready'),
+    'with each service saying whether it is actually usable');
+
+  fetchCalls.length = 0;
+  store['set-ins'].value = '15';
+  store['set-tw-token'].value = 'new-token';
+  await store['set-save'].fire('click');
+  await wait(10);
+  const saved = fetchCalls.find((c2) => c2.url === '/api/rentals/settings' && c2.opts.method === 'POST');
+  ok(!!saved, 'saving posts the settings from the rentals site itself');
+  ok(saved && saved.body.rental_insurance_per_day === '15' &&
+     saved.body.twilio_auth_token === 'new-token',
+    'with what was typed: ' + JSON.stringify(saved && saved.body));
+
+  fetchCalls.length = 0;
+  store['set-tw-test'].value = '';
+  await store['set-tw-send'].fire('click');
+  await wait(10);
+  ok(!fetchCalls.some((c2) => c2.url.includes('test-text')),
+    'a test text with no number goes nowhere');
+  store['set-tw-test'].value = '+447700900123';
+  fetchCalls.length = 0;
+  await store['set-tw-send'].fire('click');
+  await wait(10);
+  ok(fetchCalls.some((c2) => c2.url === '/api/rentals/settings/test-text'),
+    'and with one, it sends');
 
   process.exit(failed ? 1 : 0);
 })();

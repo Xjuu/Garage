@@ -210,3 +210,12 @@ table.bill tr.bill-total td {
 }
 .doc a { font-weight: 700; }
 .doc .btn { margin-left: auto; }
+
+/* Settings: explanation above each group of fields, since half of these
+   come from somebody else's dashboard and "Account SID" alone is no help. */
+.settings-hint { color: var(--g4); font-size: 12.5px; margin-bottom: 14px; }
+.settings-save {
+  display: flex; align-items: center; gap: 12px;
+  padding-top: 4px; margin-bottom: 30px;
+}
+.note a { font-weight: 700; }
